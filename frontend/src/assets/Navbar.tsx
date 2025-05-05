@@ -23,8 +23,8 @@ export function Navbar() {
 
         {/* Desktop nav */}
         <nav className="hidden md:flex items-center gap-6">
-          <Link to="/about" className="text-sm font-medium hover:underline">
-            About
+          <Link to="/live" className="text-sm font-medium hover:underline">
+            Live Scores
           </Link>
           <Link to="/teams" className="text-sm font-medium hover:underline">
             Teams
@@ -48,11 +48,11 @@ export function Navbar() {
       {mobileOpen && (
         <div className="absolute top-full left-0 right-0 bg-background border-t border-b md:hidden px-4 py-4 space-y-3 shadow-lg z-40">
           <Link
-            to="/about"
+            to="/live"
             onClick={() => setMobileOpen(false)}
             className="block text-sm font-medium hover:underline"
           >
-            About
+            Live Scores
           </Link>
           <Link
             to="/teams"
