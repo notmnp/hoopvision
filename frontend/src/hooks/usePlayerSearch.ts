@@ -32,7 +32,7 @@ export function usePlayerSearch() {
   const [error, setError] = useState<string | null>(null)
 
   async function searchPlayer(name: string) {
-    const trimmedName = name.trim()
+    const trimmedName = decodePlayerSearchInput(name).trim()
     if (!trimmedName) {
       setError("Enter a player name.")
       setPlayer(null)
@@ -48,9 +48,9 @@ export function usePlayerSearch() {
       )
       setPlayer(response.data.data)
       return response.data.data
-    } catch {
+    } catch (error) {
       setPlayer(null)
-      setError("Player not found.")
+      setError(getPlayerSearchError(error))
       return null
     } finally {
       setLoading(false)
@@ -69,4 +69,31 @@ export function usePlayerSearch() {
     searchPlayer,
     clearPlayer,
   }
+}
+
+function decodePlayerSearchInput(name: string) {
+  try {
+    return decodeURIComponent(name)
+  } catch {
+    return name
+  }
+}
+
+function getPlayerSearchError(error: unknown) {
+  if (axios.isAxiosError(error)) {
+    if (error.response?.status === 404) {
+      return "Player not found."
+    }
+
+    const detail = error.response?.data?.detail
+    if (typeof detail === "string") {
+      return detail
+    }
+
+    if (!error.response) {
+      return "Backend is unavailable."
+    }
+  }
+
+  return "Player lookup failed."
 }

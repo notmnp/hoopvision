@@ -6,7 +6,7 @@ from nba_api.stats.endpoints import playercareerstats
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.multioutput import MultiOutputRegressor
 
-from backend.app.era_adjustment import EraAdjustmentService, era_adjustment_service
+from .era_adjustment import EraAdjustmentService, era_adjustment_service
 
 
 MODEL_VERSION = "embedded-gradient-boosting-v1"

@@ -10,9 +10,12 @@ from nba_api.stats.static import players
 from nba_api.stats.endpoints import commonplayerinfo, draftcombinestats
 from nba_api.live.nba.endpoints import scoreboard
 
-from backend.app.simulation import SimulationEngine
+from .simulation import SimulationEngine
 
 app = FastAPI()
+
+NBA_STATS_TIMEOUT_SECONDS = 8
+NBA_STATS_RETRIES = 2
 
 WINGSPAN_CSV_PATH = (
     Path(__file__).resolve().parents[1] / "data" / "nba_wingspan_performance_2025.csv"
@@ -113,7 +116,9 @@ def _resolve_combine_wingspan(
     if draft_year is None or draft_year < 2000:
         return None
 
-    combine = draftcombinestats.DraftCombineStats(season_all_time="All Time")
+    combine = draftcombinestats.DraftCombineStats(
+        season_all_time="All Time", timeout=NBA_STATS_TIMEOUT_SECONDS
+    )
     data = combine.get_normalized_dict()
     target_name = _normalize_name(player_name)
 
@@ -198,7 +203,10 @@ def _resolve_wingspan(
 
 
 def _build_player_profile(
-    player_id: int, player_name: str, data: dict[str, Any]
+    player_id: int,
+    player_name: str,
+    data: dict[str, Any],
+    extra_data_warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     info = _first_record(data, "CommonPlayerInfo")
     headline = _first_record(data, "PlayerHeadlineStats")
@@ -207,6 +215,7 @@ def _build_player_profile(
     wingspan, data_warnings = _resolve_wingspan(
         player_id, player_name, position, draft_year
     )
+    data_warnings.extend(extra_data_warnings or [])
 
     return {
         "player_id": player_id,
@@ -229,9 +238,75 @@ def _build_player_profile(
     }
 
 
+def _fetch_common_player_info(player_id: int) -> dict[str, Any]:
+    last_error: Exception | None = None
+
+    for _ in range(NBA_STATS_RETRIES):
+        try:
+            info = commonplayerinfo.CommonPlayerInfo(
+                player_id=player_id,
+                timeout=NBA_STATS_TIMEOUT_SECONDS,
+            )
+            return info.get_normalized_dict()
+        except Exception as error:
+            last_error = error
+
+    raise last_error or RuntimeError("NBA Stats unavailable")
+
+
+def _fallback_player_profile(
+    player_id: int,
+    player_name: str,
+    detail: str,
+) -> dict[str, Any]:
+    wingspan, data_warnings = _resolve_wingspan(
+        player_id=player_id,
+        player_name=player_name,
+        position="",
+        draft_year=None,
+    )
+    data_warnings.append(
+        f"NBA Stats profile lookup failed, so limited fallback data is shown: {detail}"
+    )
+
+    return {
+        "player_id": player_id,
+        "name": player_name,
+        "height": None,
+        "weight": None,
+        "position": None,
+        "team": None,
+        "from_year": None,
+        "to_year": None,
+        "draft_year": None,
+        "wingspan": wingspan,
+        "data_warnings": data_warnings,
+        "headline_stats": {
+            "points": None,
+            "assists": None,
+            "rebounds": None,
+            "pie": None,
+        },
+    }
+
+
+def _player_name_from_id(player_id: int) -> str:
+    for player in players.get_players():
+        if player.get("id") == player_id:
+            return player["full_name"]
+    return str(player_id)
+
+
 def _get_player_profile_by_id(player_id: int) -> dict[str, Any]:
-    info = commonplayerinfo.CommonPlayerInfo(player_id=player_id)
-    data = info.get_normalized_dict()
+    try:
+        data = _fetch_common_player_info(player_id)
+    except Exception as error:
+        return _fallback_player_profile(
+            player_id,
+            _player_name_from_id(player_id),
+            str(error),
+        )
+
     common_info = _first_record(data, "CommonPlayerInfo")
     player_name = common_info.get("DISPLAY_FIRST_LAST") or str(player_id)
     return _build_player_profile(player_id, player_name, data)
@@ -253,14 +328,16 @@ async def get_player_info(name: str):
     player_id = player["id"]
 
     try:
-        info = commonplayerinfo.CommonPlayerInfo(player_id=player_id)
-        data = info.get_normalized_dict()
+        data = _fetch_common_player_info(player_id)
         return {
             "player": player["full_name"],
             "data": _build_player_profile(player_id, player["full_name"], data),
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching data: {str(e)}")
+        return {
+            "player": player["full_name"],
+            "data": _fallback_player_profile(player_id, player["full_name"], str(e)),
+        }
 
 
 @app.get("/scoreboard", tags=["nba"])

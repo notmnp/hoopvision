@@ -3,7 +3,7 @@ import re
 from dataclasses import asdict, dataclass
 from typing import Any, Callable
 
-from backend.app.tendency_profile import (
+from .tendency_profile import (
     TendencyProfileBuilder,
     tendency_profile_builder,
 )

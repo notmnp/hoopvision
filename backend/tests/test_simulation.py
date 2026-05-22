@@ -83,6 +83,21 @@ class SimulationEngineTest(unittest.TestCase):
 
 
 class SimulateEndpointTest(unittest.TestCase):
+    def test_get_player_returns_fallback_profile_when_nba_stats_fails(self):
+        client = TestClient(api.app)
+
+        with patch("backend.app.api._fetch_common_player_info") as common_info:
+            common_info.side_effect = TimeoutError("stats.nba.com timed out")
+
+            response = client.get("/player/Michael%20Jordan")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["player"], "Michael Jordan")
+        self.assertEqual(payload["data"]["player_id"], 893)
+        self.assertEqual(payload["data"]["wingspan"], 83.0)
+        self.assertTrue(payload["data"]["data_warnings"])
+
     def test_post_simulate_validates_distinct_players(self):
         client = TestClient(api.app)
 
