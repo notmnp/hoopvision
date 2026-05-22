@@ -5,9 +5,12 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 from nba_api.stats.static import players
 from nba_api.stats.endpoints import commonplayerinfo, draftcombinestats
 from nba_api.live.nba.endpoints import scoreboard
+
+from backend.app.simulation import SimulationEngine
 
 app = FastAPI()
 
@@ -49,6 +52,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class SimulationRequest(BaseModel):
+    player_a_id: int = Field(gt=0)
+    player_b_id: int = Field(gt=0)
+    seed: int | None = None
 
 
 def _normalize_name(name: str) -> str:
@@ -220,6 +229,14 @@ def _build_player_profile(
     }
 
 
+def _get_player_profile_by_id(player_id: int) -> dict[str, Any]:
+    info = commonplayerinfo.CommonPlayerInfo(player_id=player_id)
+    data = info.get_normalized_dict()
+    common_info = _first_record(data, "CommonPlayerInfo")
+    player_name = common_info.get("DISPLAY_FIRST_LAST") or str(player_id)
+    return _build_player_profile(player_id, player_name, data)
+
+
 @app.get("/", tags=["root"])
 async def read_root() -> dict:
     return {"message": "Welcome to your NBA API backend."}
@@ -254,4 +271,22 @@ async def get_today_scoreboard():
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to fetch scoreboard: {str(e)}"
+        )
+
+
+@app.post("/simulate", tags=["iso"])
+async def simulate_matchup(request: SimulationRequest):
+    if request.player_a_id == request.player_b_id:
+        raise HTTPException(status_code=400, detail="Players must be different")
+
+    try:
+        engine = SimulationEngine(profile_provider=_get_player_profile_by_id)
+        return engine.simulate(
+            request.player_a_id,
+            request.player_b_id,
+            request.seed,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to run simulation: {str(e)}"
         )
