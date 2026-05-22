@@ -1,5 +1,14 @@
 import { FormEvent, useState } from "react"
-import { AlertTriangle, Loader2, Search, Swords, UserRound } from "lucide-react"
+import axios from "axios"
+import {
+  AlertTriangle,
+  Loader2,
+  RotateCcw,
+  Search,
+  Swords,
+  Trophy,
+  UserRound,
+} from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -15,6 +24,44 @@ import {
 
 type SlotLabel = "Player A" | "Player B"
 
+interface PlayByPlay {
+  possession: number
+  offensive_player: string
+  shot_type: string
+  result: string
+  foul: boolean
+  turnover: boolean
+  score_a: number
+  score_b: number
+}
+
+interface PlayerSimStats {
+  points: number
+  shooting_percentage: number
+  shot_type_distribution: {
+    rim: number
+    mid_range: number
+    three: number
+  }
+  turnovers: number
+  fouls_drawn: number
+}
+
+interface MatchSummary {
+  winner: string
+  final_score: {
+    a: number
+    b: number
+  }
+  player_stats: Record<string, PlayerSimStats>
+  data_warnings: string[]
+}
+
+interface SimulationResult {
+  play_by_play: PlayByPlay[]
+  summary: MatchSummary
+}
+
 interface PlayerSlotProps {
   label: SlotLabel
   selectedPlayer: PlayerProfile | null
@@ -25,7 +72,35 @@ interface PlayerSlotProps {
 function PlayerSelectionController() {
   const [playerA, setPlayerA] = useState<PlayerProfile | null>(null)
   const [playerB, setPlayerB] = useState<PlayerProfile | null>(null)
+  const [simulationResult, setSimulationResult] =
+    useState<SimulationResult | null>(null)
+  const [simulationLoading, setSimulationLoading] = useState(false)
+  const [simulationError, setSimulationError] = useState<string | null>(null)
   const canRunSimulation = Boolean(playerA && playerB)
+
+  async function runSimulation() {
+    if (!playerA || !playerB) {
+      return
+    }
+
+    setSimulationLoading(true)
+    setSimulationError(null)
+
+    try {
+      const response = await axios.post<SimulationResult>(
+        "http://localhost:8000/simulate",
+        {
+          player_a_id: playerA.player_id,
+          player_b_id: playerB.player_id,
+        }
+      )
+      setSimulationResult(response.data)
+    } catch {
+      setSimulationError("Simulation failed. Try running the matchup again.")
+    } finally {
+      setSimulationLoading(false)
+    }
+  }
 
   return (
     <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-screen-xl flex-col px-4 py-6 md:px-6">
@@ -36,9 +111,17 @@ function PlayerSelectionController() {
             Select two players to stage a 1v1 matchup.
           </p>
         </div>
-        <Button disabled={!canRunSimulation} className="w-full md:w-auto">
-          <Swords className="h-4 w-4" />
-          Run Simulation
+        <Button
+          disabled={!canRunSimulation || simulationLoading}
+          className="w-full md:w-auto"
+          onClick={runSimulation}
+        >
+          {simulationLoading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Swords className="h-4 w-4" />
+          )}
+          {simulationResult ? "Re-run" : "Run Simulation"}
         </Button>
       </div>
 
@@ -61,6 +144,25 @@ function PlayerSelectionController() {
           onClear={() => setPlayerB(null)}
         />
       </div>
+
+      {simulationError && (
+        <div className="mt-5 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {simulationError}
+        </div>
+      )}
+
+      {simulationResult && playerA && playerB && (
+        <div className="mt-6 grid gap-4 xl:grid-cols-[24rem_1fr]">
+          <MatchSummaryView
+            summary={simulationResult.summary}
+            playerA={playerA}
+            playerB={playerB}
+            onRerun={runSimulation}
+            rerunDisabled={simulationLoading}
+          />
+          <PlayByPlayView playByPlay={simulationResult.play_by_play} />
+        </div>
+      )}
     </div>
   )
 }
@@ -198,6 +300,142 @@ function Stat({ label, value }: { label: string; value: number | null }) {
   )
 }
 
+function MatchSummaryView({
+  summary,
+  playerA,
+  playerB,
+  onRerun,
+  rerunDisabled,
+}: {
+  summary: MatchSummary
+  playerA: PlayerProfile
+  playerB: PlayerProfile
+  onRerun: () => void
+  rerunDisabled: boolean
+}) {
+  return (
+    <Card className="rounded-lg">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Trophy className="h-4 w-4" />
+          Match Summary
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <div className="rounded-md border bg-muted/30 p-4">
+          <div className="text-sm text-muted-foreground">Winner</div>
+          <div className="mt-1 text-2xl font-bold">{summary.winner}</div>
+          <div className="mt-3 flex items-center gap-3 text-sm">
+            <span>{playerA.name}</span>
+            <span className="text-xl font-semibold">
+              {summary.final_score.a}-{summary.final_score.b}
+            </span>
+            <span>{playerB.name}</span>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          {Object.entries(summary.player_stats).map(([playerName, stats]) => (
+            <PlayerStatsSummary
+              key={playerName}
+              playerName={playerName}
+              stats={stats}
+            />
+          ))}
+        </div>
+
+        {summary.data_warnings.length > 0 && (
+          <div className="flex gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div className="space-y-1">
+              {summary.data_warnings.map((warning) => (
+                <p key={warning}>{warning}</p>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <Button
+          variant="outline"
+          className="w-full"
+          onClick={onRerun}
+          disabled={rerunDisabled}
+        >
+          {rerunDisabled ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <RotateCcw className="h-4 w-4" />
+          )}
+          Re-run
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
+function PlayerStatsSummary({
+  playerName,
+  stats,
+}: {
+  playerName: string
+  stats: PlayerSimStats
+}) {
+  return (
+    <div className="rounded-md border p-3">
+      <div className="font-semibold">{playerName}</div>
+      <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+        <Attribute label="Points" value={String(stats.points)} />
+        <Attribute
+          label="FG%"
+          value={`${(stats.shooting_percentage * 100).toFixed(1)}%`}
+        />
+        <Attribute label="Turnovers" value={String(stats.turnovers)} />
+        <Attribute label="Fouls Drawn" value={String(stats.fouls_drawn)} />
+      </div>
+      <div className="mt-3 text-xs text-muted-foreground">
+        Rim {stats.shot_type_distribution.rim} | Mid{" "}
+        {stats.shot_type_distribution.mid_range} | 3PT{" "}
+        {stats.shot_type_distribution.three}
+      </div>
+    </div>
+  )
+}
+
+function PlayByPlayView({ playByPlay }: { playByPlay: PlayByPlay[] }) {
+  return (
+    <Card className="rounded-lg">
+      <CardHeader>
+        <CardTitle className="text-base">Play-by-Play</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="max-h-[34rem] space-y-2 overflow-y-auto pr-1">
+          {playByPlay.map((play) => (
+            <div
+              key={play.possession}
+              className="grid gap-2 rounded-md border p-3 text-sm md:grid-cols-[4rem_1fr_auto]"
+            >
+              <div className="font-medium text-muted-foreground">
+                #{play.possession}
+              </div>
+              <div>
+                <div className="font-medium">{play.offensive_player}</div>
+                <div className="text-muted-foreground">
+                  {formatShotType(play.shot_type)} {formatResult(play.result)}
+                  {play.foul && " with a foul"}
+                  {play.turnover && " turnover"}
+                </div>
+              </div>
+              <div className="font-semibold">
+                {play.score_a}-{play.score_b}
+              </div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 function formatWeight(weight: string | null) {
   return weight ? `${weight} lb` : "N/A"
 }
@@ -214,6 +452,23 @@ function formatCareer(
     return "N/A"
   }
   return `${fromYear ?? "?"}-${toYear ?? "?"}`
+}
+
+function formatShotType(shotType: string) {
+  if (shotType === "mid_range") {
+    return "mid-range"
+  }
+  if (shotType === "three") {
+    return "three-point"
+  }
+  return shotType
+}
+
+function formatResult(result: string) {
+  if (result === "foul_drawn") {
+    return "foul drawn"
+  }
+  return result
 }
 
 const SimulatorView = PlayerSelectionController
