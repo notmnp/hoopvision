@@ -83,6 +83,30 @@ class SimulationEngineTest(unittest.TestCase):
 
 
 class SimulateEndpointTest(unittest.TestCase):
+    def test_get_player_normalizes_encoded_spaces_plus_and_extra_spaces(self):
+        client = TestClient(api.app)
+
+        with patch("backend.app.api._fetch_common_player_info") as common_info:
+            common_info.side_effect = TimeoutError("stats.nba.com timed out")
+
+            encoded_response = client.get("/player/Michael%2520Jordan")
+            plus_response = client.get("/player/Michael+Jordan")
+            spaced_response = client.get("/player/Michael%20%20%20Jordan")
+
+        self.assertEqual(encoded_response.status_code, 200)
+        self.assertEqual(plus_response.status_code, 200)
+        self.assertEqual(spaced_response.status_code, 200)
+        self.assertEqual(encoded_response.json()["data"]["player_id"], 893)
+        self.assertEqual(plus_response.json()["data"]["player_id"], 893)
+        self.assertEqual(spaced_response.json()["data"]["player_id"], 893)
+
+    def test_get_player_treats_regex_characters_as_plain_text(self):
+        client = TestClient(api.app)
+
+        response = client.get("/player/[")
+
+        self.assertEqual(response.status_code, 404)
+
     def test_get_player_returns_fallback_profile_when_nba_stats_fails(self):
         client = TestClient(api.app)
 

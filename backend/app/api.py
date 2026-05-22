@@ -2,6 +2,7 @@ import csv
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -65,6 +66,32 @@ class SimulationRequest(BaseModel):
 
 def _normalize_name(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
+
+
+def _normalize_player_search_name(name: str) -> str:
+    decoded_name = unquote(name).replace("+", " ")
+    return re.sub(r"\s+", " ", decoded_name).strip()
+
+
+def _find_player_matches(name: str) -> list[dict[str, Any]]:
+    normalized_query = _normalize_name(_normalize_player_search_name(name))
+    if not normalized_query:
+        return []
+
+    all_players = players.get_players()
+    exact_matches = [
+        player
+        for player in all_players
+        if _normalize_name(player.get("full_name", "")) == normalized_query
+    ]
+    if exact_matches:
+        return exact_matches
+
+    return [
+        player
+        for player in all_players
+        if normalized_query in _normalize_name(player.get("full_name", ""))
+    ]
 
 
 def _first_record(data: dict[str, Any], key: str) -> dict[str, Any]:
@@ -319,8 +346,7 @@ async def read_root() -> dict:
 
 @app.get("/player/{name}", tags=["nba"])
 async def get_player_info(name: str):
-    # Find player by full or partial name
-    matched_players = players.find_players_by_full_name(name)
+    matched_players = _find_player_matches(name)
     if not matched_players:
         raise HTTPException(status_code=404, detail="Player not found")
 

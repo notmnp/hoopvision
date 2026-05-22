@@ -81,13 +81,13 @@ function decodePlayerSearchInput(name: string) {
 
 function getPlayerSearchError(error: unknown) {
   if (axios.isAxiosError(error)) {
-    if (error.response?.status === 404) {
-      return "Player not found."
-    }
-
     const detail = error.response?.data?.detail
     if (typeof detail === "string") {
       return detail
+    }
+
+    if (error.response?.status === 404) {
+      return "Player not found."
     }
 
     if (!error.response) {
