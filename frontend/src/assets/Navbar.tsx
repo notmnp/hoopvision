@@ -17,7 +17,7 @@ export function Navbar() {
       <div className="flex h-16 items-center justify-between px-4 md:px-6 mx-auto w-full max-w-screen-xl">
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2">
-          <img src={logoSrc} alt="Hoopvision logo" className="h-6 w-6" />
+          <img src={logoSrc} alt="IsoLab logo" className="h-6 w-6" />
           <span className="text-lg font-bold">IsoLab</span>
         </Link>
 
