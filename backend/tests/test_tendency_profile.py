@@ -62,6 +62,27 @@ class TendencyProfileBuilderTest(unittest.TestCase):
             sum(profile.shot_type_distribution.values()), 1.0, places=4
         )
 
+    def test_uses_league_average_fallback_when_stats_fetch_fails(self):
+        class FailingTendencyProfileBuilder(TendencyProfileBuilder):
+            def _fetch_regular_season_rows(self, player_id):
+                raise TimeoutError("stats.nba.com timed out")
+
+        builder = FailingTendencyProfileBuilder()
+
+        profile = builder.build_profile(player_id=999)
+
+        self.assertEqual(profile.era_adjustment["era_key"], "modern_spacing")
+        self.assertIn("NBA Stats career lookup failed", profile.data_warnings[0])
+        self.assertTrue(
+            any(
+                "League-average tendency inputs substituted" in warning
+                for warning in profile.data_warnings
+            )
+        )
+        self.assertAlmostEqual(
+            sum(profile.shot_type_distribution.values()), 1.0, places=4
+        )
+
     def test_accepts_explicit_career_years_for_era_adjustment(self):
         builder = StubbedTendencyProfileBuilder([])
 

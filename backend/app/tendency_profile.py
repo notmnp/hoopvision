@@ -7,6 +7,11 @@ from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.multioutput import MultiOutputRegressor
 
 from .era_adjustment import EraAdjustmentService, era_adjustment_service
+from .nba_stats_client import (
+    NBA_STATS_HEADERS,
+    NBA_STATS_TIMEOUT_SECONDS,
+    fetch_stats_data,
+)
 
 
 MODEL_VERSION = "embedded-gradient-boosting-v1"
@@ -125,8 +130,18 @@ class TendencyProfileBuilder:
         career_start_year: int | str | None = None,
         career_end_year: int | str | None = None,
     ) -> TendencyProfile:
-        season_rows = self._fetch_regular_season_rows(player_id)
+        fetch_warning = None
+        try:
+            season_rows = self._fetch_regular_season_rows(player_id)
+        except Exception as error:
+            season_rows = []
+            fetch_warning = (
+                "NBA Stats career lookup failed, so league-average tendency "
+                f"inputs were substituted: {error}"
+            )
         features, data_warnings = self._extract_features(season_rows)
+        if fetch_warning:
+            data_warnings.insert(0, fetch_warning)
         inferred_start, inferred_end = self._career_year_range(season_rows)
 
         era_adjustment = self.era_service.get_adjustment(
@@ -165,8 +180,14 @@ class TendencyProfileBuilder:
         )
 
     def _fetch_regular_season_rows(self, player_id: int) -> list[dict[str, Any]]:
-        stats = playercareerstats.PlayerCareerStats(player_id=player_id)
-        data = stats.get_normalized_dict()
+        data = fetch_stats_data(
+            f"playercareerstats:{player_id}:totals",
+            lambda: playercareerstats.PlayerCareerStats(
+                player_id=player_id,
+                headers=NBA_STATS_HEADERS.copy(),
+                timeout=NBA_STATS_TIMEOUT_SECONDS,
+            ),
+        )
         return data.get("SeasonTotalsRegularSeason", [])
 
     def _extract_features(

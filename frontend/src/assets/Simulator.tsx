@@ -95,8 +95,8 @@ function PlayerSelectionController() {
         }
       )
       setSimulationResult(response.data)
-    } catch {
-      setSimulationError("Simulation failed. Try running the matchup again.")
+    } catch (error) {
+      setSimulationError(getSimulationError(error))
     } finally {
       setSimulationLoading(false)
     }
@@ -474,3 +474,18 @@ function formatResult(result: string) {
 const SimulatorView = PlayerSelectionController
 
 export default SimulatorView
+
+function getSimulationError(error: unknown) {
+  if (axios.isAxiosError(error)) {
+    const detail = error.response?.data?.detail
+    if (typeof detail === "string") {
+      return detail
+    }
+
+    if (!error.response) {
+      return "Backend is unavailable."
+    }
+  }
+
+  return "Simulation failed. Try running the matchup again."
+}

@@ -18,13 +18,16 @@ export function Navbar() {
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2">
           <img src={logoSrc} alt="Hoopvision logo" className="h-6 w-6" />
-          <span className="text-lg font-bold">Hoopvision</span>
+          <span className="text-lg font-bold">IsoLab</span>
         </Link>
 
         {/* Desktop nav */}
         <nav className="hidden md:flex items-center gap-6">
           <Link to="/live" className="text-sm font-medium hover:underline">
             Live Scores
+          </Link>
+          <Link to="/simulate" className="text-sm font-medium hover:underline">
+            Simulator
           </Link>
           <Link to="/teams" className="text-sm font-medium hover:underline">
             Teams
@@ -53,6 +56,13 @@ export function Navbar() {
             className="block text-sm font-medium hover:underline"
           >
             Live Scores
+          </Link>
+          <Link
+            to="/simulate"
+            onClick={() => setMobileOpen(false)}
+            className="block text-sm font-medium hover:underline"
+          >
+            Simulator
           </Link>
           <Link
             to="/teams"

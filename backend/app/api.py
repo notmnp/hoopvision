@@ -11,12 +11,14 @@ from nba_api.stats.static import players
 from nba_api.stats.endpoints import commonplayerinfo, draftcombinestats
 from nba_api.live.nba.endpoints import scoreboard
 
+from .nba_stats_client import (
+    NBA_STATS_HEADERS,
+    NBA_STATS_TIMEOUT_SECONDS,
+    fetch_stats_data,
+)
 from .simulation import SimulationEngine
 
 app = FastAPI()
-
-NBA_STATS_TIMEOUT_SECONDS = 8
-NBA_STATS_RETRIES = 2
 
 WINGSPAN_CSV_PATH = (
     Path(__file__).resolve().parents[1] / "data" / "nba_wingspan_performance_2025.csv"
@@ -31,6 +33,7 @@ CURATED_WINGSPAN_INCHES = {
     "jerry west": 81.0,
     "kareem abdul-jabbar": 89.0,
     "karl malone": 84.0,
+    "kyrie irving": 76.0,
     "larry bird": 84.0,
     "magic johnson": 84.0,
     "michael jordan": 83.0,
@@ -143,10 +146,14 @@ def _resolve_combine_wingspan(
     if draft_year is None or draft_year < 2000:
         return None
 
-    combine = draftcombinestats.DraftCombineStats(
-        season_all_time="All Time", timeout=NBA_STATS_TIMEOUT_SECONDS
+    data = fetch_stats_data(
+        "draftcombinestats:all_time",
+        lambda: draftcombinestats.DraftCombineStats(
+            season_all_time="All Time",
+            headers=NBA_STATS_HEADERS.copy(),
+            timeout=NBA_STATS_TIMEOUT_SECONDS,
+        ),
     )
-    data = combine.get_normalized_dict()
     target_name = _normalize_name(player_name)
 
     for row in data.get("DraftCombineStats", []):
@@ -266,19 +273,14 @@ def _build_player_profile(
 
 
 def _fetch_common_player_info(player_id: int) -> dict[str, Any]:
-    last_error: Exception | None = None
-
-    for _ in range(NBA_STATS_RETRIES):
-        try:
-            info = commonplayerinfo.CommonPlayerInfo(
-                player_id=player_id,
-                timeout=NBA_STATS_TIMEOUT_SECONDS,
-            )
-            return info.get_normalized_dict()
-        except Exception as error:
-            last_error = error
-
-    raise last_error or RuntimeError("NBA Stats unavailable")
+    return fetch_stats_data(
+        f"commonplayerinfo:{player_id}",
+        lambda: commonplayerinfo.CommonPlayerInfo(
+            player_id=player_id,
+            headers=NBA_STATS_HEADERS.copy(),
+            timeout=NBA_STATS_TIMEOUT_SECONDS,
+        ),
+    )
 
 
 def _fallback_player_profile(

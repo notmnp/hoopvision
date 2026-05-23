@@ -122,6 +122,25 @@ class SimulateEndpointTest(unittest.TestCase):
         self.assertEqual(payload["data"]["wingspan"], 83.0)
         self.assertTrue(payload["data"]["data_warnings"])
 
+    def test_get_player_uses_curated_wingspan_when_profile_lookup_fails(self):
+        client = TestClient(api.app)
+
+        with patch("backend.app.api._fetch_common_player_info") as common_info:
+            common_info.side_effect = TimeoutError("stats.nba.com timed out")
+
+            response = client.get("/player/Kyrie%20Irving")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["data"]["player_id"], 202681)
+        self.assertEqual(payload["data"]["wingspan"], 76.0)
+        self.assertFalse(
+            any(
+                "Position-average wingspan substituted" in warning
+                for warning in payload["data"]["data_warnings"]
+            )
+        )
+
     def test_post_simulate_validates_distinct_players(self):
         client = TestClient(api.app)
 
