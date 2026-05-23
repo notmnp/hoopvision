@@ -43,6 +43,9 @@ class MatchupConditionedStats:
     fgm: int
     fga: int
     points: int
+    free_throw_attempts: int
+    turnovers: int
+    blocks: int
     zone_data: list[ZoneShotData]
     height_bucket: str
 
@@ -82,6 +85,19 @@ class MatchupDataService:
         points = round(
             sum(self._to_float(row.get("PLAYER_PTS")) for row in conditioned_rows)
         )
+        free_throw_attempts = round(
+            sum(self._to_float(row.get("MATCHUP_FTA")) for row in conditioned_rows)
+        )
+        turnovers = round(
+            sum(self._to_float(row.get("MATCHUP_TOV")) for row in conditioned_rows)
+        )
+        blocks = round(
+            sum(
+                self._to_float(row.get("MATCHUP_BLK"))
+                + self._to_float(row.get("HELP_BLK"))
+                for row in conditioned_rows
+            )
+        )
         zone_data = self._fetch_zone_data(player_id, normalized_bucket)
         return MatchupConditionedStats(
             sufficient_sample=possession_count >= SUFFICIENT_SAMPLE_POSSESSIONS,
@@ -89,6 +105,9 @@ class MatchupDataService:
             fgm=fgm,
             fga=fga,
             points=points,
+            free_throw_attempts=free_throw_attempts,
+            turnovers=turnovers,
+            blocks=blocks,
             zone_data=zone_data,
             height_bucket=normalized_bucket,
         )
@@ -262,6 +281,9 @@ class MatchupDataService:
             fgm=0,
             fga=0,
             points=0,
+            free_throw_attempts=0,
+            turnovers=0,
+            blocks=0,
             zone_data=[],
             height_bucket=height_bucket,
         )

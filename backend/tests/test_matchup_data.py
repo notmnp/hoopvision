@@ -39,6 +39,10 @@ class MatchupDataServiceTest(unittest.TestCase):
                             "MATCHUP_FGM": 10,
                             "MATCHUP_FGA": 20,
                             "PLAYER_PTS": 26,
+                            "MATCHUP_FTA": 4,
+                            "MATCHUP_TOV": 3,
+                            "MATCHUP_BLK": 1,
+                            "HELP_BLK": 1,
                         },
                         {
                             "DEF_PLAYER_ID": 11,
@@ -46,6 +50,10 @@ class MatchupDataServiceTest(unittest.TestCase):
                             "MATCHUP_FGM": 4,
                             "MATCHUP_FGA": 11,
                             "PLAYER_PTS": 10,
+                            "MATCHUP_FTA": 2,
+                            "MATCHUP_TOV": 1,
+                            "MATCHUP_BLK": 0,
+                            "HELP_BLK": 1,
                         },
                         {
                             "DEF_PLAYER_ID": 12,
@@ -88,6 +96,9 @@ class MatchupDataServiceTest(unittest.TestCase):
         self.assertEqual(stats.fgm, 14)
         self.assertEqual(stats.fga, 31)
         self.assertEqual(stats.points, 36)
+        self.assertEqual(stats.free_throw_attempts, 6)
+        self.assertEqual(stats.turnovers, 4)
+        self.assertEqual(stats.blocks, 3)
         self.assertEqual(stats.height_bucket, "wing")
         self.assertEqual(len(stats.zone_data), 2)
         self.assertAlmostEqual(sum(zone.frequency for zone in stats.zone_data), 1.0)
