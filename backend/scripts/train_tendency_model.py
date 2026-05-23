@@ -33,7 +33,6 @@ from backend.app.nba_stats_client import (  # noqa: E402
     NBA_STATS_TIMEOUT_SECONDS,
     fetch_stats_data,
 )
-from backend.app.tendency_profile import TendencyProfileBuilder  # noqa: E402
 
 
 MODEL_VERSION = "v2_matchup_conditioned"
@@ -224,9 +223,7 @@ class TendencyModelTrainer:
     def _extract_features(self, career_rows: list[dict[str, Any]]) -> dict[str, float]:
         totals = self._sum_totals(career_rows)
         games = max(1.0, totals["GP"])
-        career_start, career_end = TendencyProfileBuilder._career_year_range(
-            career_rows
-        )
+        career_start, career_end = self._career_year_range(career_rows)
         era_adjustment = self.era_service.get_adjustment(career_start, career_end)
 
         return {
@@ -457,6 +454,20 @@ class TendencyModelTrainer:
                 if int(season_id[:4]) >= 2013:
                     return True
         return False
+
+    @staticmethod
+    def _career_year_range(
+        season_rows: list[dict[str, Any]]
+    ) -> tuple[int | None, int | None]:
+        years = []
+        for row in season_rows:
+            season_id = str(row.get("SEASON_ID") or "")
+            if len(season_id) >= 4 and season_id[:4].isdigit():
+                years.append(int(season_id[:4]))
+
+        if not years:
+            return None, None
+        return min(years), max(years) + 1
 
     @staticmethod
     def _per_game(value: float, games: float) -> float:

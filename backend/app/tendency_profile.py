@@ -1,12 +1,20 @@
+import logging
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any
 
+import joblib
 import numpy as np
 from nba_api.stats.endpoints import playercareerstats
-from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.multioutput import MultiOutputRegressor
 
 from .era_adjustment import EraAdjustmentService, era_adjustment_service
+from .matchup_data import (
+    HEIGHT_BUCKETS,
+    MatchupConditionedStats,
+    MatchupDataService,
+    ZoneShotData,
+    matchup_data_service,
+)
 from .nba_stats_client import (
     NBA_STATS_HEADERS,
     NBA_STATS_TIMEOUT_SECONDS,
@@ -14,16 +22,32 @@ from .nba_stats_client import (
 )
 
 
-MODEL_VERSION = "embedded-gradient-boosting-v1"
+logger = logging.getLogger(__name__)
+
+DEFAULT_MODEL_VERSION = "v2_matchup_conditioned"
+MODEL_ARTIFACT_DIR = Path(__file__).resolve().parents[1] / "data"
+MODEL_ARTIFACT_PATTERN = "tendency_model_*.joblib"
+SHRINKAGE_POSSESSION_TARGET = 200
+MAX_OBSERVED_BLEND_WEIGHT = 0.8
+
+HEIGHT_BUCKET_ORDINAL = {
+    "guard": 0,
+    "wing": 1,
+    "big": 2,
+    "center": 3,
+}
 
 FEATURE_COLUMNS = (
+    "height_bucket_ordinal",
     "points_per_game",
-    "field_goal_attempts_per_game",
+    "fga_per_game",
     "three_point_attempt_rate",
     "free_throw_attempt_rate",
     "assist_per_game",
     "turnover_per_game",
     "rebound_per_game",
+    "block_per_game",
+    "steal_per_game",
     "pace_multiplier",
     "scoring_environment_multiplier",
 )
@@ -37,52 +61,21 @@ OUTPUT_COLUMNS = (
     "three_efficiency",
     "foul_drawing_rate",
     "turnover_rate",
+    "block_rate",
+    "steal_rate",
 )
 
 LEAGUE_AVERAGE_FEATURES = {
     "points_per_game": 12.0,
-    "field_goal_attempts_per_game": 9.5,
+    "fga_per_game": 9.5,
     "three_point_attempt_rate": 0.30,
     "free_throw_attempt_rate": 0.24,
     "assist_per_game": 2.4,
     "turnover_per_game": 1.5,
     "rebound_per_game": 4.5,
+    "block_per_game": 0.5,
+    "steal_per_game": 0.8,
 }
-
-TRAINING_ROWS = (
-    {
-        "features": (30.0, 21.0, 0.18, 0.34, 5.0, 3.0, 6.0, 1.0, 1.0),
-        "outputs": (0.38, 0.44, 0.18, 0.68, 0.46, 0.36, 0.18, 0.12),
-    },
-    {
-        "features": (27.0, 20.0, 0.42, 0.20, 6.5, 3.2, 5.0, 1.0, 1.0),
-        "outputs": (0.28, 0.22, 0.50, 0.64, 0.44, 0.41, 0.12, 0.13),
-    },
-    {
-        "features": (24.0, 16.0, 0.10, 0.45, 3.0, 2.5, 10.0, 1.0, 1.0),
-        "outputs": (0.58, 0.32, 0.10, 0.72, 0.42, 0.32, 0.23, 0.14),
-    },
-    {
-        "features": (16.0, 11.0, 0.55, 0.14, 2.0, 1.1, 4.0, 1.0, 1.0),
-        "outputs": (0.20, 0.18, 0.62, 0.62, 0.42, 0.40, 0.08, 0.09),
-    },
-    {
-        "features": (18.0, 14.0, 0.04, 0.32, 8.5, 3.4, 4.0, 1.0, 1.0),
-        "outputs": (0.44, 0.48, 0.08, 0.65, 0.45, 0.31, 0.16, 0.16),
-    },
-    {
-        "features": (10.0, 7.5, 0.02, 0.26, 1.4, 1.2, 9.0, 1.0, 1.0),
-        "outputs": (0.68, 0.28, 0.04, 0.70, 0.39, 0.25, 0.13, 0.12),
-    },
-    {
-        "features": (8.0, 6.0, 0.38, 0.18, 1.2, 0.8, 3.5, 1.0, 1.0),
-        "outputs": (0.24, 0.22, 0.54, 0.60, 0.40, 0.37, 0.07, 0.08),
-    },
-    {
-        "features": (14.0, 10.5, 0.22, 0.28, 4.5, 1.8, 5.5, 1.0, 1.0),
-        "outputs": (0.38, 0.34, 0.28, 0.64, 0.43, 0.35, 0.12, 0.10),
-    },
-)
 
 
 @dataclass(frozen=True)
@@ -95,41 +88,81 @@ class TendencyProfile:
     turnover_rate: float
     era_adjustment: dict[str, Any]
     data_warnings: list[str]
+    block_rate: float = 0.04
+    steal_rate: float = 0.06
+    confidence_tier: str = "MEDIUM"
+    height_bucket: str = "wing"
+    matchup_possession_count: int = 0
+    observed_blend_weight: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
-class EmbeddedTendencyModel:
-    def __init__(self):
-        features = np.array([row["features"] for row in TRAINING_ROWS])
-        outputs = np.array([row["outputs"] for row in TRAINING_ROWS])
-        self.model = MultiOutputRegressor(
-            GradientBoostingRegressor(random_state=7, n_estimators=40, max_depth=2)
-        )
-        self.model.fit(features, outputs)
+class ArtifactBackedTendencyModel:
+    def __init__(self, artifact: dict[str, Any]):
+        self.artifact = artifact
+        self.model = artifact["model"]
+        self.metadata = artifact.get("metadata", {})
+        self.model_version = self.metadata.get("model_version", DEFAULT_MODEL_VERSION)
 
     def predict(self, features: dict[str, float]) -> dict[str, float]:
-        feature_vector = np.array([[features[column] for column in FEATURE_COLUMNS]])
+        feature_columns = tuple(self.metadata.get("feature_columns", FEATURE_COLUMNS))
+        target_columns = tuple(self.metadata.get("target_columns", OUTPUT_COLUMNS))
+        feature_vector = np.array([[features[column] for column in feature_columns]])
         prediction = self.model.predict(feature_vector)[0]
-        return dict(zip(OUTPUT_COLUMNS, prediction, strict=True))
+        return dict(zip(target_columns, prediction, strict=True))
+
+
+def load_tendency_model(
+    artifact_dir: Path = MODEL_ARTIFACT_DIR,
+) -> ArtifactBackedTendencyModel:
+    artifact_path = _latest_artifact_path(artifact_dir)
+    artifact = joblib.load(artifact_path)
+    model = ArtifactBackedTendencyModel(artifact)
+    calibration_report = model.metadata.get("calibration_report", {})
+    logger.info(
+        "Loaded tendency model artifact %s version=%s calibration=%s",
+        artifact_path,
+        model.model_version,
+        calibration_report,
+    )
+    return model
+
+
+def _latest_artifact_path(artifact_dir: Path) -> Path:
+    artifacts = sorted(artifact_dir.glob(MODEL_ARTIFACT_PATTERN))
+    if not artifacts:
+        raise FileNotFoundError(
+            f"No tendency model artifact found in {artifact_dir}. "
+            "Run backend/scripts/train_tendency_model.py first."
+        )
+    return artifacts[-1]
 
 
 class TendencyProfileBuilder:
     def __init__(
         self,
-        model: EmbeddedTendencyModel | None = None,
+        model: ArtifactBackedTendencyModel | Any | None = None,
         era_service: EraAdjustmentService = era_adjustment_service,
+        matchup_service: MatchupDataService = matchup_data_service,
     ):
-        self.model = model or EmbeddedTendencyModel()
+        self.model = model or load_tendency_model()
         self.era_service = era_service
+        self.matchup_service = matchup_service
 
     def build_profile(
         self,
         player_id: int,
+        height_bucket: str | int | None = "wing",
         career_start_year: int | str | None = None,
         career_end_year: int | str | None = None,
     ) -> TendencyProfile:
+        height_bucket, career_start_year, career_end_year = self._normalize_arguments(
+            height_bucket,
+            career_start_year,
+            career_end_year,
+        )
         fetch_warning = None
         try:
             season_rows = self._fetch_regular_season_rows(player_id)
@@ -139,21 +172,49 @@ class TendencyProfileBuilder:
                 "NBA Stats career lookup failed, so league-average tendency "
                 f"inputs were substituted: {error}"
             )
-        features, data_warnings = self._extract_features(season_rows)
+
+        features, era_adjustment, data_warnings = self._build_model_input(
+            season_rows,
+            height_bucket,
+            career_start_year,
+            career_end_year,
+        )
         if fetch_warning:
             data_warnings.insert(0, fetch_warning)
-        inferred_start, inferred_end = self._career_year_range(season_rows)
 
-        era_adjustment = self.era_service.get_adjustment(
-            career_start_year or inferred_start,
-            career_end_year or inferred_end,
-        )
-        features["pace_multiplier"] = era_adjustment.pace_multiplier
-        features["scoring_environment_multiplier"] = (
-            era_adjustment.scoring_environment_multiplier
-        )
+        prediction = self._predict(features)
+        post_tracking_player = self._has_tracking_era_season(season_rows)
+        observed_stats = None
+        if post_tracking_player:
+            try:
+                observed_stats = self.matchup_service.get_matchup_stats(
+                    player_id,
+                    height_bucket,
+                )
+            except Exception as error:
+                data_warnings.append(
+                    "Observed matchup data could not be loaded, so the model-only "
+                    f"profile was used: {error}"
+                )
 
-        prediction = self.model.predict(features)
+        observed_weight = 0.0
+        if observed_stats and observed_stats.possession_count > 0:
+            observed_output = self._observed_output(observed_stats, features)
+            observed_weight = self._observed_weight(observed_stats.possession_count)
+            prediction = self._blend_outputs(
+                prediction, observed_output, observed_weight
+            )
+
+        confidence_tier = self._confidence_tier(
+            post_tracking_player,
+            observed_stats.possession_count if observed_stats else 0,
+            features,
+        )
+        if confidence_tier != "HIGH":
+            data_warnings.append(
+                f"Tendency profile confidence is {confidence_tier}; simulation accuracy may be limited."
+            )
+
         shot_distribution = self._normalize_distribution(
             {
                 "rim": prediction["rim_frequency"],
@@ -164,7 +225,7 @@ class TendencyProfileBuilder:
 
         return TendencyProfile(
             player_id=player_id,
-            model_version=MODEL_VERSION,
+            model_version=getattr(self.model, "model_version", DEFAULT_MODEL_VERSION),
             shot_type_distribution=shot_distribution,
             scoring_efficiency_by_shot_type={
                 "rim": self._clamp(prediction["rim_efficiency"], 0.45, 0.85),
@@ -175,9 +236,43 @@ class TendencyProfileBuilder:
             },
             foul_drawing_rate=self._clamp(prediction["foul_drawing_rate"], 0.03, 0.30),
             turnover_rate=self._clamp(prediction["turnover_rate"], 0.04, 0.24),
+            block_rate=self._clamp(prediction["block_rate"], 0.0, 0.30),
+            steal_rate=self._clamp(prediction["steal_rate"], 0.0, 0.30),
             era_adjustment=era_adjustment.to_dict(),
             data_warnings=data_warnings,
+            confidence_tier=confidence_tier,
+            height_bucket=height_bucket,
+            matchup_possession_count=(
+                observed_stats.possession_count if observed_stats else 0
+            ),
+            observed_blend_weight=observed_weight,
         )
+
+    def _build_model_input(
+        self,
+        season_rows: list[dict[str, Any]],
+        height_bucket: str,
+        career_start_year: int | str | None,
+        career_end_year: int | str | None,
+    ) -> tuple[dict[str, float], Any, list[str]]:
+        features, data_warnings = self._extract_features(season_rows)
+        inferred_start, inferred_end = self._career_year_range(season_rows)
+        era_adjustment = self.era_service.get_adjustment(
+            career_start_year or inferred_start,
+            career_end_year or inferred_end,
+        )
+        features["height_bucket_ordinal"] = float(HEIGHT_BUCKET_ORDINAL[height_bucket])
+        features["pace_multiplier"] = era_adjustment.pace_multiplier
+        features["scoring_environment_multiplier"] = (
+            era_adjustment.scoring_environment_multiplier
+        )
+        return features, era_adjustment, data_warnings
+
+    def _predict(self, features: dict[str, float]) -> dict[str, float]:
+        prediction = self.model.predict(features)
+        if isinstance(prediction, dict):
+            return {column: float(prediction[column]) for column in OUTPUT_COLUMNS}
+        return dict(zip(OUTPUT_COLUMNS, prediction, strict=True))
 
     def _fetch_regular_season_rows(self, player_id: int) -> list[dict[str, Any]]:
         data = fetch_stats_data(
@@ -203,13 +298,14 @@ class TendencyProfileBuilder:
             )
             return {
                 **LEAGUE_AVERAGE_FEATURES,
+                "height_bucket_ordinal": 1.0,
                 "pace_multiplier": 1.0,
                 "scoring_environment_multiplier": 1.0,
             }, data_warnings
 
         features = {
             "points_per_game": self._per_game(totals, "PTS", games),
-            "field_goal_attempts_per_game": self._per_game(totals, "FGA", games),
+            "fga_per_game": self._per_game(totals, "FGA", games),
             "three_point_attempt_rate": self._safe_rate(
                 totals.get("FG3A"), totals.get("FGA")
             ),
@@ -219,6 +315,9 @@ class TendencyProfileBuilder:
             "assist_per_game": self._per_game(totals, "AST", games),
             "turnover_per_game": self._per_game(totals, "TOV", games),
             "rebound_per_game": self._per_game(totals, "REB", games),
+            "block_per_game": self._per_game(totals, "BLK", games),
+            "steal_per_game": self._per_game(totals, "STL", games),
+            "height_bucket_ordinal": 1.0,
             "pace_multiplier": 1.0,
             "scoring_environment_multiplier": 1.0,
         }
@@ -232,9 +331,117 @@ class TendencyProfileBuilder:
 
         return features, data_warnings
 
+    @classmethod
+    def _observed_output(
+        cls,
+        matchup_stats: MatchupConditionedStats,
+        features: dict[str, float],
+    ) -> dict[str, float]:
+        zone_output = cls._zone_output(matchup_stats.zone_data)
+        possessions = max(1, matchup_stats.possession_count)
+        fga = max(1, matchup_stats.fga)
+        return {
+            **zone_output,
+            "foul_drawing_rate": cls._clamp(
+                matchup_stats.free_throw_attempts / fga, 0.0, 1.0
+            ),
+            "turnover_rate": cls._clamp(
+                matchup_stats.turnovers / possessions, 0.0, 1.0
+            ),
+            "block_rate": cls._clamp(matchup_stats.blocks / fga, 0.0, 1.0),
+            "steal_rate": cls._clamp(features["steal_per_game"] / 12.0, 0.0, 1.0),
+        }
+
+    @classmethod
+    def _zone_output(cls, zone_data: list[ZoneShotData]) -> dict[str, float]:
+        grouped = {
+            "rim": {"fga": 0, "fgm": 0},
+            "mid_range": {"fga": 0, "fgm": 0},
+            "three": {"fga": 0, "fgm": 0},
+        }
+        for zone in zone_data:
+            shot_type = cls._shot_type_from_zone(zone)
+            grouped[shot_type]["fga"] += zone.fga
+            grouped[shot_type]["fgm"] += zone.fgm
+
+        total_fga = sum(bucket["fga"] for bucket in grouped.values())
+        if total_fga <= 0:
+            return {
+                "rim_frequency": 0.34,
+                "mid_range_frequency": 0.33,
+                "three_frequency": 0.33,
+                "rim_efficiency": 0.62,
+                "mid_range_efficiency": 0.42,
+                "three_efficiency": 0.36,
+            }
+
+        return {
+            "rim_frequency": round(grouped["rim"]["fga"] / total_fga, 4),
+            "mid_range_frequency": round(grouped["mid_range"]["fga"] / total_fga, 4),
+            "three_frequency": round(grouped["three"]["fga"] / total_fga, 4),
+            "rim_efficiency": cls._efficiency(grouped["rim"]),
+            "mid_range_efficiency": cls._efficiency(grouped["mid_range"]),
+            "three_efficiency": cls._efficiency(grouped["three"]),
+        }
+
+    @staticmethod
+    def _shot_type_from_zone(zone: ZoneShotData) -> str:
+        text = " ".join(
+            (zone.shot_zone_basic, zone.shot_zone_area, zone.shot_zone_range)
+        ).lower()
+        if "3" in text or "24+" in text:
+            return "three"
+        if "restricted area" in text or "paint" in text or "less than 8" in text:
+            return "rim"
+        return "mid_range"
+
+    @staticmethod
+    def _blend_outputs(
+        model_output: dict[str, float],
+        observed_output: dict[str, float],
+        observed_weight: float,
+    ) -> dict[str, float]:
+        model_weight = 1.0 - observed_weight
+        return {
+            column: round(
+                model_output[column] * model_weight
+                + observed_output[column] * observed_weight,
+                4,
+            )
+            for column in OUTPUT_COLUMNS
+        }
+
+    @staticmethod
+    def _observed_weight(possession_count: int) -> float:
+        return round(
+            min(
+                possession_count / SHRINKAGE_POSSESSION_TARGET,
+                MAX_OBSERVED_BLEND_WEIGHT,
+            ),
+            4,
+        )
+
+    @staticmethod
+    def _confidence_tier(
+        post_tracking_player: bool,
+        possession_count: int,
+        features: dict[str, float],
+    ) -> str:
+        at_distribution_boundary = (
+            features["points_per_game"] >= 35
+            or features["fga_per_game"] >= 26
+            or features["rebound_per_game"] >= 18
+            or features["block_per_game"] >= 5
+        )
+        if possession_count >= 100 and not at_distribution_boundary:
+            return "HIGH"
+        if post_tracking_player and not at_distribution_boundary:
+            return "MEDIUM"
+        return "LOW"
+
     @staticmethod
     def _sum_totals(season_rows: list[dict[str, Any]]) -> dict[str, float]:
-        columns = ("GP", "PTS", "FGA", "FG3A", "FTA", "AST", "TOV", "REB")
+        columns = ("GP", "PTS", "FGA", "FG3A", "FTA", "AST", "TOV", "REB", "BLK", "STL")
         return {
             column: sum(
                 TendencyProfileBuilder._to_float(row.get(column)) for row in season_rows
@@ -257,6 +464,34 @@ class TendencyProfileBuilder:
         return min(years), max(years) + 1
 
     @staticmethod
+    def _has_tracking_era_season(season_rows: list[dict[str, Any]]) -> bool:
+        for row in season_rows:
+            season_id = str(row.get("SEASON_ID") or "")
+            if len(season_id) >= 4 and season_id[:4].isdigit():
+                if int(season_id[:4]) >= 2013:
+                    return True
+        return False
+
+    @staticmethod
+    def _normalize_arguments(
+        height_bucket: str | int | None,
+        career_start_year: int | str | None,
+        career_end_year: int | str | None,
+    ) -> tuple[str, int | str | None, int | str | None]:
+        if isinstance(height_bucket, str):
+            normalized_bucket = height_bucket.strip().lower()
+            if normalized_bucket in HEIGHT_BUCKETS:
+                return normalized_bucket, career_start_year, career_end_year
+            if not normalized_bucket.isdigit():
+                raise ValueError(
+                    f"height_bucket must be one of {', '.join(HEIGHT_BUCKETS)}"
+                )
+
+        if height_bucket is not None:
+            return "wing", height_bucket, career_start_year
+        return "wing", career_start_year, career_end_year
+
+    @staticmethod
     def _per_game(totals: dict[str, float], column: str, games: float) -> float:
         return round(totals.get(column, 0) / games, 4)
 
@@ -265,6 +500,12 @@ class TendencyProfileBuilder:
         if not denominator:
             return 0.0
         return round((numerator or 0) / denominator, 4)
+
+    @staticmethod
+    def _efficiency(values: dict[str, int]) -> float:
+        if values["fga"] <= 0:
+            return 0.0
+        return round(values["fgm"] / values["fga"], 4)
 
     @staticmethod
     def _to_float(value: Any) -> float:
