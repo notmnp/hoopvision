@@ -1,45 +1,9 @@
-import { useEffect, useState } from "react"
-import axios from "axios"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-
-interface Team {
-  teamId: number
-  teamTricode: string
-  score: number
-  wins: number
-  losses: number
-}
-
-interface Leader {
-  personId: number
-  name: string
-  points: number
-}
-
-interface Game {
-  gameId: string
-  gameStatusText: string
-  gameLabel: string
-  homeTeam: Team
-  awayTeam: Team
-  gameLeaders?: {
-    homeLeaders?: Leader
-    awayLeaders?: Leader
-  }
-}
+import { useScoreboard } from "@/hooks/useScoreboard"
 
 const Home = () => {
-  const [games, setGames] = useState<Game[]>([])
-
-  useEffect(() => {
-    axios
-      .get("http://localhost:8000/scoreboard")
-      .then((res) => {
-        setGames(res.data.scoreboard.games)
-      })
-      .catch((err) => console.error("Error fetching scoreboard:", err))
-  }, [])
+  const { games } = useScoreboard()
 
   return (
     <div className="min-h-screen px-4 py-8 max-w-screen-lg mx-auto">
