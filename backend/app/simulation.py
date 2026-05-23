@@ -7,6 +7,7 @@ from .tendency_profile import (
     TendencyProfileBuilder,
     tendency_profile_builder,
 )
+from .matchup_data import MatchupDataService
 
 
 ProfileProvider = Callable[[int], dict[str, Any]]
@@ -70,11 +71,19 @@ class SimulationEngine:
         rng = random.Random(seed)
         player_a = self.profile_provider(player_a_id)
         player_b = self.profile_provider(player_b_id)
+        player_a_defender_bucket = self._height_bucket(player_b.get("height"))
+        player_b_defender_bucket = self._height_bucket(player_a.get("height"))
         profile_a = self.profile_builder.build_profile(
-            player_a_id, player_a.get("from_year"), player_a.get("to_year")
+            player_a_id,
+            height_bucket=player_a_defender_bucket,
+            career_start_year=player_a.get("from_year"),
+            career_end_year=player_a.get("to_year"),
         )
         profile_b = self.profile_builder.build_profile(
-            player_b_id, player_b.get("from_year"), player_b.get("to_year")
+            player_b_id,
+            height_bucket=player_b_defender_bucket,
+            career_start_year=player_b.get("from_year"),
+            career_end_year=player_b.get("to_year"),
         )
 
         scores = {"a": 0, "b": 0}
@@ -275,6 +284,12 @@ class SimulationEngine:
             return 78.0
 
         return float(int(match.group(1)) * 12 + int(match.group(2)))
+
+    @staticmethod
+    def _height_bucket(value: Any) -> str:
+        return MatchupDataService.height_bucket_for_inches(
+            SimulationEngine._height_inches(value)
+        )
 
     @staticmethod
     def _to_float(value: Any) -> float:

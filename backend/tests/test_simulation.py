@@ -30,7 +30,24 @@ def make_profile(player_id, three_frequency=0.2):
 
 
 class StubProfileBuilder:
-    def build_profile(self, player_id, career_start_year=None, career_end_year=None):
+    def __init__(self):
+        self.calls = []
+
+    def build_profile(
+        self,
+        player_id,
+        height_bucket="wing",
+        career_start_year=None,
+        career_end_year=None,
+    ):
+        self.calls.append(
+            {
+                "player_id": player_id,
+                "height_bucket": height_bucket,
+                "career_start_year": career_start_year,
+                "career_end_year": career_end_year,
+            }
+        )
         return make_profile(player_id)
 
 
@@ -58,7 +75,8 @@ class SimulationEngineTest(unittest.TestCase):
                 "data_warnings": [],
             },
         }
-        self.engine = SimulationEngine(self.players.get, StubProfileBuilder())
+        self.profile_builder = StubProfileBuilder()
+        self.engine = SimulationEngine(self.players.get, self.profile_builder)
 
     def test_simulation_runs_to_21_and_alternates_possessions(self):
         result = self.engine.simulate(1, 2, seed=42)
@@ -80,6 +98,17 @@ class SimulationEngineTest(unittest.TestCase):
         result = self.engine.simulate(1, 2, seed=12)
 
         self.assertEqual(result["summary"]["data_warnings"], ["substituted wingspan"])
+
+    def test_passes_opponent_height_bucket_to_profile_builder(self):
+        self.players[1]["height"] = "6-4"
+        self.players[2]["height"] = "7-0"
+
+        self.engine.simulate(1, 2, seed=3)
+
+        self.assertEqual(self.profile_builder.calls[0]["height_bucket"], "center")
+        self.assertEqual(self.profile_builder.calls[1]["height_bucket"], "guard")
+        self.assertEqual(self.profile_builder.calls[0]["career_start_year"], 1990)
+        self.assertEqual(self.profile_builder.calls[1]["career_end_year"], 2024)
 
 
 class SimulateEndpointTest(unittest.TestCase):
