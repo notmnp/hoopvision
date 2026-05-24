@@ -17,6 +17,7 @@ from .nba_stats_client import (
     NBA_STATS_TIMEOUT_SECONDS,
     fetch_stats_data,
 )
+from .player_data import get_player_season_stats, list_player_seasons
 from .simulation import SimulationEngine
 
 app = FastAPI()
@@ -86,6 +87,26 @@ class BulkSimulationResult(BaseModel):
     total_simulations: int
     player_a_win_pct: float
     player_b_win_pct: float
+
+
+class PlayerSeasonOption(BaseModel):
+    season_id: str
+    season_label: str
+
+
+class PlayerSeasonStats(BaseModel):
+    season_id: str
+    season_label: str
+    season_year: int
+    points_per_game: float
+    fga_per_game: float
+    three_point_attempt_rate: float
+    free_throw_attempt_rate: float
+    assist_per_game: float
+    turnover_per_game: float
+    rebound_per_game: float
+    block_per_game: float
+    steal_per_game: float
 
 
 def _normalize_name(name: str) -> str:
@@ -387,6 +408,43 @@ async def get_player_info(name: str):
             "player": player["full_name"],
             "data": _fallback_player_profile(player_id, player["full_name"], str(e)),
         }
+
+
+@app.get(
+    "/player/{player_id}/seasons",
+    tags=["nba"],
+    response_model=list[PlayerSeasonOption],
+)
+async def get_player_seasons(player_id: int):
+    try:
+        return list_player_seasons(player_id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to load player seasons: {str(e)}",
+        )
+
+
+@app.get(
+    "/player/{player_id}/season/{season_id}",
+    tags=["nba"],
+    response_model=PlayerSeasonStats,
+)
+async def get_player_season(player_id: int, season_id: str):
+    try:
+        stats = get_player_season_stats(player_id, season_id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to load player season stats: {str(e)}",
+        )
+
+    if stats is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No regular-season stats found for season {season_id}",
+        )
+    return stats
 
 
 @app.get("/scoreboard", tags=["nba"])

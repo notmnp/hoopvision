@@ -9,7 +9,6 @@ from typing import Any
 
 import joblib
 import numpy as np
-from nba_api.stats.endpoints import playercareerstats
 from nba_api.stats.static import players
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.metrics import mean_absolute_error, r2_score, root_mean_squared_error
@@ -23,15 +22,16 @@ if str(PROJECT_ROOT) not in sys.path:
 from backend.app.era_adjustment import EraAdjustmentService, era_adjustment_service
 from backend.app.matchup_data import (  # noqa: E402
     HEIGHT_BUCKETS,
+    TRACKING_ERA_START_SEASON,
     MatchupConditionedStats,
     MatchupDataService,
     ZoneShotData,
     matchup_data_service,
 )
-from backend.app.nba_stats_client import (  # noqa: E402
-    NBA_STATS_HEADERS,
-    NBA_STATS_TIMEOUT_SECONDS,
-    fetch_stats_data,
+from backend.app.player_data import (  # noqa: E402
+    aggregate_season_totals,
+    fetch_career_season_rows,
+    season_stats_from_totals,
 )
 
 
@@ -193,36 +193,38 @@ class TendencyModelTrainer:
 
         for player_id in ids:
             career_rows = self._fetch_career_rows(player_id)
-            if not self._has_tracking_era_season(career_rows):
-                continue
-
-            features_base = self._extract_features(career_rows)
             position_archetype = self._position_archetype(career_rows)
-            for height_bucket in HEIGHT_BUCKETS:
-                matchup_stats = self.matchup_service.get_matchup_stats(
-                    player_id,
-                    height_bucket,
-                )
-                if matchup_stats.possession_count <= 0:
+            for season_id, totals in aggregate_season_totals(career_rows).items():
+                season_stats = season_stats_from_totals(season_id, totals)
+                if season_stats["season_year"] < TRACKING_ERA_START_SEASON:
                     continue
 
-                features = {
-                    **features_base,
-                    "height_bucket_ordinal": float(
-                        HEIGHT_BUCKET_ORDINAL[height_bucket]
-                    ),
-                }
-                rows.append(
-                    TrainingRow(
-                        player_id=player_id,
-                        height_bucket=height_bucket,
-                        position_archetype=position_archetype,
-                        sufficient_sample=matchup_stats.sufficient_sample,
-                        possession_count=matchup_stats.possession_count,
-                        features=features,
-                        targets=self._extract_targets(matchup_stats, features),
+                features_base = self._season_features(season_stats)
+                for height_bucket in HEIGHT_BUCKETS:
+                    matchup_stats = self.matchup_service.get_matchup_stats(
+                        player_id,
+                        height_bucket,
                     )
-                )
+                    if matchup_stats.possession_count <= 0:
+                        continue
+
+                    features = {
+                        **features_base,
+                        "height_bucket_ordinal": float(
+                            HEIGHT_BUCKET_ORDINAL[height_bucket]
+                        ),
+                    }
+                    rows.append(
+                        TrainingRow(
+                            player_id=player_id,
+                            height_bucket=height_bucket,
+                            position_archetype=position_archetype,
+                            sufficient_sample=matchup_stats.sufficient_sample,
+                            possession_count=matchup_stats.possession_count,
+                            features=features,
+                            targets=self._extract_targets(matchup_stats, features),
+                        )
+                    )
         return rows
 
     def train(self, rows: list[TrainingRow]) -> dict[str, Any]:
@@ -265,32 +267,24 @@ class TendencyModelTrainer:
         return output_path
 
     def _fetch_career_rows(self, player_id: int) -> list[dict[str, Any]]:
-        data = fetch_stats_data(
-            f"playercareerstats:{player_id}:totals",
-            lambda: playercareerstats.PlayerCareerStats(
-                player_id=player_id,
-                headers=NBA_STATS_HEADERS.copy(),
-                timeout=NBA_STATS_TIMEOUT_SECONDS,
-            ),
-        )
-        return data.get("SeasonTotalsRegularSeason", [])
+        return fetch_career_season_rows(player_id)
 
-    def _extract_features(self, career_rows: list[dict[str, Any]]) -> dict[str, float]:
-        totals = self._sum_totals(career_rows)
-        games = max(1.0, totals["GP"])
-        career_start, career_end = self._career_year_range(career_rows)
-        era_adjustment = self.era_service.get_adjustment(career_start, career_end)
-
+    def _season_features(self, season_stats: dict[str, Any]) -> dict[str, float]:
+        # Era normalization is applied per season rather than across a career
+        # range: a single season belongs to exactly one era, so the source year
+        # is passed for both ends of get_adjustment.
+        season_year = season_stats["season_year"]
+        era_adjustment = self.era_service.get_adjustment(season_year, season_year)
         return {
-            "points_per_game": self._per_game(totals["PTS"], games),
-            "fga_per_game": self._per_game(totals["FGA"], games),
-            "three_point_attempt_rate": self._safe_rate(totals["FG3A"], totals["FGA"]),
-            "free_throw_attempt_rate": self._safe_rate(totals["FTA"], totals["FGA"]),
-            "assist_per_game": self._per_game(totals["AST"], games),
-            "turnover_per_game": self._per_game(totals["TOV"], games),
-            "rebound_per_game": self._per_game(totals["REB"], games),
-            "block_per_game": self._per_game(totals["BLK"], games),
-            "steal_per_game": self._per_game(totals["STL"], games),
+            "points_per_game": season_stats["points_per_game"],
+            "fga_per_game": season_stats["fga_per_game"],
+            "three_point_attempt_rate": season_stats["three_point_attempt_rate"],
+            "free_throw_attempt_rate": season_stats["free_throw_attempt_rate"],
+            "assist_per_game": season_stats["assist_per_game"],
+            "turnover_per_game": season_stats["turnover_per_game"],
+            "rebound_per_game": season_stats["rebound_per_game"],
+            "block_per_game": season_stats["block_per_game"],
+            "steal_per_game": season_stats["steal_per_game"],
             "pace_multiplier": era_adjustment.pace_multiplier,
             "scoring_environment_multiplier": (
                 era_adjustment.scoring_environment_multiplier
@@ -486,16 +480,6 @@ class TendencyModelTrainer:
         }
 
     @staticmethod
-    def _sum_totals(career_rows: list[dict[str, Any]]) -> dict[str, float]:
-        columns = ("GP", "PTS", "FGA", "FG3A", "FTA", "AST", "TOV", "REB", "BLK", "STL")
-        return {
-            column: sum(
-                TendencyModelTrainer._to_float(row.get(column)) for row in career_rows
-            )
-            for column in columns
-        }
-
-    @staticmethod
     def _position_archetype(career_rows: list[dict[str, Any]]) -> str:
         position = " ".join(
             str(row.get("PLAYER_POSITION") or "") for row in career_rows
@@ -510,39 +494,6 @@ class TendencyModelTrainer:
         return "wing"
 
     @staticmethod
-    def _has_tracking_era_season(career_rows: list[dict[str, Any]]) -> bool:
-        for row in career_rows:
-            season_id = str(row.get("SEASON_ID") or "")
-            if len(season_id) >= 4 and season_id[:4].isdigit():
-                if int(season_id[:4]) >= 2013:
-                    return True
-        return False
-
-    @staticmethod
-    def _career_year_range(
-        season_rows: list[dict[str, Any]]
-    ) -> tuple[int | None, int | None]:
-        years = []
-        for row in season_rows:
-            season_id = str(row.get("SEASON_ID") or "")
-            if len(season_id) >= 4 and season_id[:4].isdigit():
-                years.append(int(season_id[:4]))
-
-        if not years:
-            return None, None
-        return min(years), max(years) + 1
-
-    @staticmethod
-    def _per_game(value: float, games: float) -> float:
-        return round(value / games, 4)
-
-    @staticmethod
-    def _safe_rate(numerator: float, denominator: float) -> float:
-        if denominator <= 0:
-            return 0.0
-        return round(numerator / denominator, 4)
-
-    @staticmethod
     def _efficiency(values: dict[str, int]) -> float:
         if values["fga"] <= 0:
             return 0.0
@@ -551,13 +502,6 @@ class TendencyModelTrainer:
     @staticmethod
     def _clamp(value: float, minimum: float, maximum: float) -> float:
         return round(max(minimum, min(maximum, value)), 4)
-
-    @staticmethod
-    def _to_float(value: Any) -> float:
-        try:
-            return float(value or 0)
-        except (TypeError, ValueError):
-            return 0.0
 
 
 def parse_args() -> argparse.Namespace:
