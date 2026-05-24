@@ -11,6 +11,8 @@ export interface PlayerSeasonStats {
   season_id: string
   season_label: string
   season_year: number
+  team_id: number
+  team_abbreviation: string
   points_per_game: number
   fga_per_game: number
   three_point_attempt_rate: number

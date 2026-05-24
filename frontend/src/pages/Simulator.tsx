@@ -1,28 +1,32 @@
 import {
   CSSProperties,
-  FormEvent,
   ReactNode,
   useEffect,
   useRef,
   useState,
 } from "react"
 import axios from "axios"
+import { Command as CommandPrimitive } from "cmdk"
 import { API_BASE_URL } from "@/lib/config"
 import {
   AlertTriangle,
   CalendarDays,
   FastForward,
   Loader2,
+  MoveHorizontal,
   Percent,
   Repeat,
   RotateCcw,
+  Ruler,
   Search,
   Shuffle,
   Swords,
   Trophy,
   UserRound,
+  Weight,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { getTeamColor, getTeamLogoUrl, withAlpha } from "@/lib/teamColors"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -33,14 +37,20 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 import {
-  Popover,
-  PopoverAnchor,
-  PopoverContent,
-} from "@/components/ui/popover"
+  CommandEmpty,
+  CommandGroup,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
 import { Progress } from "@/components/ui/progress"
-import { Separator } from "@/components/ui/separator"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   Tooltip,
   TooltipContent,
@@ -160,7 +170,6 @@ interface PlayerSlotProps {
   onSelect: (player: PlayerProfile) => void
   onClear: () => void
   onSeasonSelect: (seasonId: string | null) => void
-  winPct?: number | null
   confidenceTier?: ConfidenceTier | null
 }
 
@@ -285,8 +294,7 @@ function PlayerSelectionController() {
     <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-screen-xl flex-col px-4 py-8 md:px-6">
       <div className="mb-6 flex flex-col gap-4 border-b pb-6 md:flex-row md:items-end md:justify-between">
         <div className="space-y-1">
-          <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-            <Swords className="h-4 w-4" />
+          <div className="text-sm font-medium text-muted-foreground">
             ISO Simulator
           </div>
           <h1 className="text-3xl font-bold tracking-tight">
@@ -303,18 +311,31 @@ function PlayerSelectionController() {
             disabled={busy}
           />
           <div className="flex flex-col items-stretch gap-2 sm:flex-row md:items-end">
-            <Button
-              disabled={!canRunSimulation || busy}
-              className="sm:w-auto"
-              onClick={runSimulation}
-            >
-              {simulationLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Swords className="h-4 w-4" />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                {/* Wrapped in a span so the tooltip still fires while the
+                    button is disabled (disabled controls emit no hover). */}
+                <span className="flex w-full sm:w-auto">
+                  <Button
+                    disabled={!canRunSimulation || busy}
+                    className="w-full sm:w-auto"
+                    onClick={runSimulation}
+                  >
+                    {simulationLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Swords className="h-4 w-4" />
+                    )}
+                    {simulationResult ? "Re-run game" : "Run game"}
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              {!canRunSimulation && (
+                <TooltipContent>
+                  {runRequirementHint(playerA, playerB, seasonA, seasonB)}
+                </TooltipContent>
               )}
-              {simulationResult ? "Re-run game" : "Run game"}
-            </Button>
+            </Tooltip>
             <Button
               variant="secondary"
               disabled={!canRunSimulation || busy}
@@ -332,12 +353,6 @@ function PlayerSelectionController() {
         </div>
       </div>
 
-      {!canRunSimulation && (
-        <p className="mb-4 text-sm text-muted-foreground">
-          {runRequirementHint(playerA, playerB, seasonA, seasonB)}
-        </p>
-      )}
-
       <div className="grid flex-1 grid-cols-1 gap-4 lg:grid-cols-[1fr_auto_1fr] lg:items-start">
         <PlayerSlot
           label="Player A"
@@ -346,7 +361,6 @@ function PlayerSelectionController() {
           onSelect={selectPlayerA}
           onClear={() => selectPlayerA(null)}
           onSeasonSelect={selectSeasonA}
-          winPct={bulkResult ? bulkResult.player_a_win_pct : null}
           confidenceTier={
             playerA
               ? simulationResult?.summary.player_stats[playerA.name]
@@ -366,7 +380,6 @@ function PlayerSelectionController() {
           onSelect={selectPlayerB}
           onClear={() => selectPlayerB(null)}
           onSeasonSelect={selectSeasonB}
-          winPct={bulkResult ? bulkResult.player_b_win_pct : null}
           confidenceTier={
             playerB
               ? simulationResult?.summary.player_stats[playerB.name]
@@ -415,11 +428,11 @@ function PlayerSlot({
   onSelect,
   onClear,
   onSeasonSelect,
-  winPct,
   confidenceTier,
 }: PlayerSlotProps) {
   const [query, setQuery] = useState("")
   const [suggestionsOpen, setSuggestionsOpen] = useState(false)
+  const searchContainerRef = useRef<HTMLDivElement>(null)
   const { player, loading, error, searchPlayer, clearPlayer } = usePlayerSearch()
   const {
     suggestions,
@@ -444,8 +457,14 @@ function PlayerSlot({
 
   const profile = selectedPlayer ?? player
 
+  // Team branding follows the selected season: the card accent color, the logo
+  // on the headshot, and the team badge all reflect who the player suited up
+  // for that year.
+  const seasonTeamColor = getTeamColor(seasonStats?.team_abbreviation)
+  const seasonTeamLogo = getTeamLogoUrl(seasonStats?.team_id)
+  const seasonTeam = seasonStats?.team_abbreviation || null
+
   // Debounced type-ahead: fetch suggestions 300ms after the last keystroke.
-  // The Popover handles dismiss-on-outside-click and Escape via onOpenChange.
   useEffect(() => {
     const trimmed = query.trim()
     if (!trimmed) {
@@ -455,6 +474,20 @@ function PlayerSlot({
     const handle = setTimeout(() => searchSuggestions(trimmed), 300)
     return () => clearTimeout(handle)
   }, [query, searchSuggestions, clearSuggestions])
+
+  // The results float beneath the input, so close them on any outside click.
+  useEffect(() => {
+    function handlePointerDown(event: MouseEvent) {
+      if (
+        searchContainerRef.current &&
+        !searchContainerRef.current.contains(event.target as Node)
+      ) {
+        setSuggestionsOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", handlePointerDown)
+    return () => document.removeEventListener("mousedown", handlePointerDown)
+  }, [])
 
   // Confirm a freshly searched player: close the suggestions dropdown, load the
   // player's seasons, then default the selection to the most recent one (the
@@ -473,18 +506,9 @@ function PlayerSlot({
     }
   }
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setSuggestionsOpen(false)
-    const result = await searchPlayer(query)
-    if (result) {
-      await confirmPlayer(result)
-    }
-  }
-
   async function handleSelectSuggestion(suggestion: PlayerSuggestion) {
-    setQuery(suggestion.full_name)
     setSuggestionsOpen(false)
+    setQuery("")
     clearSuggestions()
     const result = await searchPlayer(suggestion.full_name)
     if (result) {
@@ -516,174 +540,216 @@ function PlayerSlot({
   }
 
   return (
-    <Card className="min-h-[32rem] rounded-lg">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+    <div
+      className="flex min-h-[32rem] flex-col overflow-hidden rounded-lg border bg-card shadow-sm"
+      style={
+        seasonTeamColor
+          ? {
+              backgroundImage: `linear-gradient(to bottom right, ${withAlpha(
+                seasonTeamColor,
+                0.16
+              )}, transparent 60%)`,
+            }
+          : undefined
+      }
+    >
+      {/* A thin bar of the season team's color tops the card. */}
+      {seasonTeamColor && (
+        <div className="h-1 w-full" style={{ backgroundColor: seasonTeamColor }} />
+      )}
+
+      {/* Slot label, with Clear anchored to the card's top-right once a player
+          is selected. */}
+      <div className="flex items-center justify-between gap-2 border-b px-4 py-2.5">
+        <span className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
           <UserRound className="h-4 w-4" />
           {label}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-5">
-        <Popover open={suggestionsOpen} onOpenChange={setSuggestionsOpen}>
-          <PopoverAnchor asChild>
-            <form onSubmit={handleSubmit} className="flex gap-2">
-              <Input
-                value={query}
-                onChange={(event) => {
-                  setQuery(event.target.value)
-                  setSuggestionsOpen(event.target.value.trim() !== "")
-                }}
-                onFocus={() => {
-                  if (query.trim() !== "") {
-                    setSuggestionsOpen(true)
-                  }
-                }}
-                placeholder="Search a player…"
-                aria-label={`Search ${label}`}
-                autoComplete="off"
-              />
-              <Button
-                type="submit"
-                size="icon"
-                aria-label={`Search ${label}`}
-                disabled={loading || !query.trim()}
-              >
-                {loading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Search className="h-4 w-4" />
-                )}
-              </Button>
-            </form>
-          </PopoverAnchor>
-          <PopoverContent
-            align="start"
-            sideOffset={6}
-            // Keep focus in the input so the user can keep typing while the
-            // suggestion list is open.
-            onOpenAutoFocus={(event) => event.preventDefault()}
-            className="max-h-64 overflow-y-auto p-1"
-            style={{ width: "var(--radix-popover-trigger-width)" }}
+        </span>
+        {profile && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-muted-foreground"
+            onClick={handleClear}
+            aria-label="Clear player"
           >
-            {suggestions.length === 0 ? (
-              <div className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground">
-                {suggestionsLoading ? (
-                  <>
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    Searching…
-                  </>
-                ) : (
-                  "No players found."
-                )}
-              </div>
-            ) : (
-              <ul>
-                {suggestions.map((suggestion) => (
-                  <li key={suggestion.id}>
-                    <button
-                      type="button"
-                      onClick={() => handleSelectSuggestion(suggestion)}
-                      className="flex w-full items-center rounded-sm px-3 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-                    >
-                      {suggestion.full_name}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </PopoverContent>
-        </Popover>
-
-        {error && (
-          <Alert variant="destructive">
-            <AlertTriangle className="h-4 w-4" />
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
+            Clear
+          </Button>
         )}
+      </div>
 
-        {profile ? (
-          <div className="space-y-5">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-start gap-3">
-                <PlayerAvatar
-                  playerId={profile.player_id}
-                  name={profile.name}
-                />
-                <div className="space-y-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-2xl font-semibold leading-tight">
-                      {profile.name}
-                    </h2>
-                    {confidenceTier && <ConfidenceBadge tier={confidenceTier} />}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {profile.position && <Badge>{profile.position}</Badge>}
-                    {profile.team && (
-                      <Badge variant="secondary">{profile.team}</Badge>
-                    )}
-                    {winPct != null && (
-                      <Pill tone="brand">Wins {Math.round(winPct)}%</Pill>
-                    )}
-                  </div>
+      {profile ? (
+        <div className="flex flex-1 flex-col">
+          {/* Identity: photo, name, confidence, and the season tag pinned
+              top-right in line with the name. The team badge carries its logo. */}
+          <div className="flex items-start gap-3 p-4">
+            <PlayerAvatar playerId={profile.player_id} name={profile.name} />
+            <div className="min-w-0 flex-1 space-y-1.5">
+              {/* Top row: name (left) + SEASON label (right) */}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <h2 className="text-xl font-semibold leading-tight">
+                    {profile.name}
+                  </h2>
+                  {confidenceTier && <ConfidenceBadge tier={confidenceTier} />}
                 </div>
+                <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Season
+                </span>
               </div>
-              <Button variant="ghost" size="sm" onClick={handleClear}>
-                Clear
-              </Button>
+              {/* Bottom row: position/team badges (left) + selector (right) */}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex flex-wrap gap-1.5">
+                  {profile.position && <Badge>{profile.position}</Badge>}
+                  {(seasonTeam ?? profile.team) && (
+                    <Badge variant="secondary" className="gap-1.5 pl-1.5">
+                      {seasonTeamLogo && (
+                        <img
+                          src={seasonTeamLogo}
+                          alt=""
+                          onError={(event) => {
+                            event.currentTarget.style.display = "none"
+                          }}
+                          className="h-3.5 w-3.5 object-contain"
+                        />
+                      )}
+                      {seasonTeam ?? profile.team}
+                    </Badge>
+                  )}
+                </div>
+                <SeasonSelector
+                  label={label}
+                  seasons={seasons}
+                  value={selectedSeason}
+                  loading={seasonsLoading}
+                  onChange={handleSeasonChange}
+                />
+              </div>
+              {seasonsError && (
+                <p className="text-xs text-destructive">{seasonsError}</p>
+              )}
             </div>
+          </div>
 
-            <SeasonSelector
-              label={label}
-              seasons={seasons}
-              value={selectedSeason}
-              loading={seasonsLoading}
-              onChange={handleSeasonChange}
+          {/* Vitals — translucent tiles, labelled in words */}
+          <div className="grid grid-cols-3 gap-2 px-4 pb-3">
+            <VitalTile
+              icon={Ruler}
+              label="Height"
+              value={profile.height ?? "N/A"}
             />
+            <VitalTile
+              icon={Weight}
+              label="Weight"
+              value={formatWeight(profile.weight)}
+            />
+            <VitalTile
+              icon={MoveHorizontal}
+              label="Wingspan"
+              value={formatWingspan(profile.wingspan)}
+            />
+          </div>
 
-            {seasonsError && (
-              <Alert variant="destructive">
-                <AlertTriangle className="h-4 w-4" />
-                <AlertDescription>{seasonsError}</AlertDescription>
-              </Alert>
-            )}
-
-            <Separator />
-
-            <div className="grid grid-cols-2 gap-3">
-              <Attribute label="Height" value={profile.height ?? "N/A"} />
-              <Attribute label="Weight" value={formatWeight(profile.weight)} />
-              <Attribute
-                label="Wingspan"
-                value={formatWingspan(profile.wingspan)}
-              />
-              <Attribute
-                label="Season"
-                value={selectedSeason ?? "Not selected"}
-              />
-            </div>
-
-            <SeasonStatsPanel
+          {/* Season averages */}
+          <div className="px-4 pb-4">
+            <SeasonStatsBody
               selectedSeason={selectedSeason}
               stats={seasonStats}
               loading={seasonStatsLoading}
               error={seasonStatsError}
+              teamColor={seasonTeamColor}
             />
-
-            {profile.data_warnings.length > 0 && (
-              <WarningAlert warnings={profile.data_warnings} />
-            )}
           </div>
-        ) : (
-          <div className="flex min-h-72 flex-col items-center justify-center gap-2 rounded-md border border-dashed text-sm text-muted-foreground">
+
+          {profile.data_warnings.length > 0 && (
+            <div className="px-4 pb-4">
+              <WarningAlert warnings={profile.data_warnings} />
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="flex flex-1 flex-col gap-4 p-4">
+          {/* The field itself is the cmdk search input; results float directly
+              beneath it. shouldFilter is off because the backend already filters
+              and ranks — cmdk just renders and keyboard-navigates the results. */}
+          <div ref={searchContainerRef} className="relative">
+            <CommandPrimitive
+              shouldFilter={false}
+              className="overflow-visible bg-transparent"
+            >
+              <div className="flex h-9 items-center gap-2 rounded-md border bg-background px-3 shadow-sm focus-within:ring-1 focus-within:ring-ring">
+                <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <CommandPrimitive.Input
+                  value={query}
+                  onValueChange={(value) => {
+                    setQuery(value)
+                    setSuggestionsOpen(value.trim() !== "")
+                  }}
+                  onFocus={() => {
+                    if (query.trim() !== "") {
+                      setSuggestionsOpen(true)
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      setSuggestionsOpen(false)
+                    }
+                  }}
+                  placeholder={`Search ${label}…`}
+                  aria-label={`Search ${label}`}
+                  className="flex h-9 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                />
+                {(loading || suggestionsLoading) && (
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
+                )}
+              </div>
+
+              {suggestionsOpen && query.trim() !== "" && (
+                <CommandList className="absolute left-0 right-0 top-full z-50 mt-1 max-h-64 overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
+                  {suggestionsLoading && suggestions.length === 0 ? (
+                    <div className="flex items-center justify-center gap-2 py-4 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Searching…
+                    </div>
+                  ) : suggestions.length === 0 ? (
+                    <CommandEmpty>No players found.</CommandEmpty>
+                  ) : (
+                    <CommandGroup className="p-0">
+                      {suggestions.map((suggestion) => (
+                        <CommandItem
+                          key={suggestion.id}
+                          value={`${suggestion.full_name}__${suggestion.id}`}
+                          onSelect={() => handleSelectSuggestion(suggestion)}
+                        >
+                          {suggestion.full_name}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  )}
+                </CommandList>
+              )}
+            </CommandPrimitive>
+          </div>
+
+          {error && (
+            <Alert variant="destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-md border border-dashed text-sm text-muted-foreground">
             <UserRound className="h-8 w-8 opacity-40" />
             No player selected
           </div>
-        )}
-      </CardContent>
-    </Card>
+        </div>
+      )}
+    </div>
   )
 }
 
+// The season tag IS the selector: it shows the active season and opens the
+// season list on click, so there's a single season control (no separate badge).
 function SeasonSelector({
   label,
   seasons,
@@ -698,60 +764,62 @@ function SeasonSelector({
   onChange: (seasonId: string) => void
 }) {
   return (
-    <div className="space-y-1.5">
-      <label
-        className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground"
-        htmlFor={`${label}-season`}
+    <Select
+      value={value ?? undefined}
+      onValueChange={onChange}
+      disabled={loading || seasons.length === 0}
+    >
+      <SelectTrigger
+        aria-label={`Select season for ${label}`}
+        className="h-auto w-fit gap-1.5 rounded-full border-0 bg-background/70 px-3 py-1 text-xs font-medium shadow-sm ring-1 ring-border focus-visible:ring-2"
       >
-        <CalendarDays className="h-3.5 w-3.5" />
-        Season
-      </label>
-      <div className="relative">
-        <select
-          id={`${label}-season`}
-          aria-label={`Select season for ${label}`}
-          value={value ?? ""}
-          disabled={loading || seasons.length === 0}
-          onChange={(event) => onChange(event.target.value)}
-          className={cn(
-            "flex h-9 w-full appearance-none rounded-md border border-input bg-background px-3 py-1 pr-8 text-sm shadow-sm transition-colors",
-            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-            "disabled:cursor-not-allowed disabled:opacity-50"
-          )}
-        >
-          <option value="" disabled>
-            {loading ? "Loading seasons…" : "Select a season"}
-          </option>
-          {seasons.map((season) => (
-            <option key={season.season_id} value={season.season_id}>
-              {season.season_label}
-            </option>
-          ))}
-        </select>
-        {loading ? (
-          <Loader2 className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
-        ) : (
-          <CalendarDays className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        )}
-      </div>
-    </div>
+        <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
+        <SelectValue
+          placeholder={loading ? "Loading seasons…" : "Select a season"}
+        />
+      </SelectTrigger>
+      <SelectContent position="popper" side="bottom" sideOffset={6} className="max-h-64">
+        {seasons.map((season) => (
+          <SelectItem key={season.season_id} value={season.season_id}>
+            {season.season_label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   )
 }
 
-function SeasonStatsPanel({
+// The season averages portion of the player card: the headline scoring number
+// The per-game averages for the selected season, shown as soft translucent
+// tiles (the team-color card tint reads through them). The surrounding card
+// chrome — identity, vitals, season tag — is composed in PlayerSlot.
+// Per-stat ceilings used to scale the bars. These are "elite season" tops, so
+// a star fills most of the bar and a role player reads clearly shorter.
+const STAT_BAR_MAX = {
+  PTS: 36,
+  REB: 15,
+  AST: 12,
+  FGA: 28,
+  BLK: 4,
+  STL: 3.5,
+} as const
+
+function SeasonStatsBody({
   selectedSeason,
   stats,
   loading,
   error,
+  teamColor,
 }: {
   selectedSeason: string | null
   stats: PlayerSeasonStats | null
   loading: boolean
   error: string | null
+  teamColor: string | null
 }) {
   if (!selectedSeason) {
     return (
-      <div className="flex items-center justify-center rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+      <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
         Select a season to view that year's stats.
       </div>
     )
@@ -759,48 +827,119 @@ function SeasonStatsPanel({
 
   if (error) {
     return (
-      <Alert variant="destructive">
-        <AlertTriangle className="h-4 w-4" />
-        <AlertDescription>{error}</AlertDescription>
-      </Alert>
+      <div className="flex items-center gap-2 py-6 text-sm text-destructive">
+        <AlertTriangle className="h-4 w-4 shrink-0" />
+        {error}
+      </div>
     )
   }
 
   if (loading || !stats) {
     return (
-      <div className="flex items-center justify-center gap-2 rounded-md border bg-muted/30 p-4 text-sm text-muted-foreground">
+      <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" />
         Loading {selectedSeason} stats…
       </div>
     )
   }
 
+  // A horizontal bar per stat, filled in the team's color and scaled to its
+  // ceiling — the same translucent, length-encodes-magnitude idea as the shot
+  // map, so the player's statistical shape reads at a glance.
+  const bars = [
+    { label: "PTS", value: stats.points_per_game, max: STAT_BAR_MAX.PTS },
+    { label: "REB", value: stats.rebound_per_game, max: STAT_BAR_MAX.REB },
+    { label: "AST", value: stats.assist_per_game, max: STAT_BAR_MAX.AST },
+    { label: "FGA", value: stats.fga_per_game, max: STAT_BAR_MAX.FGA },
+    { label: "BLK", value: stats.block_per_game, max: STAT_BAR_MAX.BLK },
+    { label: "STL", value: stats.steal_per_game, max: STAT_BAR_MAX.STL },
+  ]
+
   return (
-    <div className="space-y-2">
-      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {stats.season_label} per game
+    <div className="space-y-3.5 rounded-md bg-background/60 p-4 shadow-sm ring-1 ring-border">
+      {bars.map((bar) => (
+        <StatBar
+          key={bar.label}
+          label={bar.label}
+          value={bar.value}
+          max={bar.max}
+          color={teamColor}
+        />
+      ))}
+    </div>
+  )
+}
+
+function StatBar({
+  label,
+  value,
+  max,
+  color,
+}: {
+  label: string
+  value: number
+  max: number
+  color: string | null
+}) {
+  // Floor at a sliver so a near-zero stat is still visibly a (tiny) bar.
+  const fraction = Math.max(0.03, Math.min(1, value / max))
+  return (
+    <div className="flex items-center gap-3">
+      <span className="w-8 shrink-0 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {label}
+      </span>
+      <div className="h-3 flex-1 overflow-hidden rounded-full bg-foreground/10">
+        <div
+          className="h-full rounded-full transition-[width] duration-500"
+          style={{
+            width: `${fraction * 100}%`,
+            backgroundColor: color ? withAlpha(color, 0.85) : "var(--primary)",
+          }}
+        />
       </div>
-      <div className="grid grid-cols-3 gap-3 rounded-md border bg-muted/30 p-3">
-        <Stat label="PTS" value={stats.points_per_game} />
-        <Stat label="REB" value={stats.rebound_per_game} />
-        <Stat label="AST" value={stats.assist_per_game} />
-        <Stat label="FGA" value={stats.fga_per_game} />
-        <Stat label="BLK" value={stats.block_per_game} />
-        <Stat label="STL" value={stats.steal_per_game} />
+      <span className="w-9 shrink-0 text-right text-sm font-semibold tabular-nums">
+        {value.toFixed(1)}
+      </span>
+    </div>
+  )
+}
+
+// Translucent vitals tile with a word label (icons alone read as unclear).
+function VitalTile({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: typeof Ruler
+  label: string
+  value: string
+}) {
+  return (
+    <div className="rounded-md bg-background/70 px-3 py-2.5 shadow-sm ring-1 ring-border">
+      <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        <Icon className="h-3 w-3" />
+        {label}
+      </div>
+      <div className="mt-0.5 text-sm font-semibold tabular-nums">{value}</div>
+    </div>
+  )
+}
+
+// Shared translucent stat tile, matching the shot-map chip treatment.
+function StatTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md bg-background/70 px-2 py-2.5 text-center shadow-sm ring-1 ring-border">
+      <div className="text-lg font-semibold tabular-nums">{value}</div>
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+        {label}
       </div>
     </div>
   )
 }
 
-function PlayerAvatar({
-  playerId,
-  name,
-}: {
-  playerId: number
-  name: string
-}) {
+function PlayerAvatar({ playerId, name }: { playerId: number; name: string }) {
   return (
-    <Avatar className="h-14 w-14 rounded-md border bg-muted">
+    <Avatar className="h-14 w-14 shrink-0 rounded-md border bg-muted">
       <AvatarImage
         src={`https://cdn.nba.com/headshots/nba/latest/1040x760/${playerId}.png`}
         alt={name}
@@ -958,26 +1097,6 @@ function WinProbabilityCard({
         </p>
       </CardContent>
     </Card>
-  )
-}
-
-function Attribute({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border bg-muted/30 p-3">
-      <div className="text-xs uppercase text-muted-foreground">{label}</div>
-      <div className="mt-1 text-sm font-semibold">{value}</div>
-    </div>
-  )
-}
-
-function Stat({ label, value }: { label: string; value: number | null }) {
-  return (
-    <div className="text-center">
-      <div className="text-xs uppercase text-muted-foreground">{label}</div>
-      <div className="mt-1 text-xl font-semibold">
-        {typeof value === "number" ? value.toFixed(1) : "N/A"}
-      </div>
-    </div>
   )
 }
 
@@ -1145,17 +1264,6 @@ function PlayerStatsSummary({
           </span>
         </span>
       </div>
-    </div>
-  )
-}
-
-function StatTile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border bg-muted/30 p-2 text-center">
-      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-        {label}
-      </div>
-      <div className="mt-0.5 text-lg font-semibold tabular-nums">{value}</div>
     </div>
   )
 }
@@ -1513,7 +1621,9 @@ async function runBulkClientSide(
   let playerBWins = 0
   let ties = 0
 
-  for (let seed = 0; seed < BULK_SIM_COUNT; seed++) {
+  // No seed is sent, so each game is independently random server-side and the
+  // batch differs run to run (mirrors the bulk endpoint's fresh-RNG behavior).
+  for (let game = 0; game < BULK_SIM_COUNT; game++) {
     const response = await axios.post<SimulationResult>(
       `${API_BASE_URL}/simulate`,
       {
@@ -1522,7 +1632,6 @@ async function runBulkClientSide(
         season_a_id: seasonAId,
         season_b_id: seasonBId,
         possession_mode: possessionMode,
-        seed,
       }
     )
     const { a, b } = response.data.summary.final_score
