@@ -1,5 +1,6 @@
 import { useState } from "react"
 import axios from "axios"
+import { API_BASE_URL } from "@/lib/config"
 
 export interface PlayerProfile {
   player_id: number
@@ -44,7 +45,7 @@ export function usePlayerSearch() {
 
     try {
       const response = await axios.get<PlayerSearchResponse>(
-        `http://localhost:8000/player/${encodeURIComponent(trimmedName)}`
+        `${API_BASE_URL}/player/${encodeURIComponent(trimmedName)}`
       )
       setPlayer(response.data.data)
       return response.data.data

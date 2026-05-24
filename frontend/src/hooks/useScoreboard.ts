@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import axios from "axios"
+import { API_BASE_URL } from "@/lib/config"
 
 export interface Team {
   teamId: number
@@ -47,7 +48,7 @@ export function useScoreboard() {
 
       try {
         const response = await axios.get<ScoreboardResponse>(
-          "http://localhost:8000/scoreboard"
+          `${API_BASE_URL}/scoreboard`
         )
         if (!cancelled) {
           setGames(response.data.scoreboard.games)

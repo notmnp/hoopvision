@@ -1,4 +1,5 @@
 import csv
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -50,7 +51,7 @@ POSITION_AVERAGE_WINGSPAN_INCHES = {
     "C": 88.0,
 }
 
-origins = ["http://localhost:5173", "localhost:5173"]
+origins = os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
 
 app.add_middleware(
     CORSMiddleware,

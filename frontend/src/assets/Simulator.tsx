@@ -1,5 +1,6 @@
 import { FormEvent, useState } from "react"
 import axios from "axios"
+import { API_BASE_URL } from "@/lib/config"
 import {
   AlertTriangle,
   Loader2,
@@ -88,7 +89,7 @@ function PlayerSelectionController() {
 
     try {
       const response = await axios.post<SimulationResult>(
-        "http://localhost:8000/simulate",
+        `${API_BASE_URL}/simulate`,
         {
           player_a_id: playerA.player_id,
           player_b_id: playerB.player_id,
