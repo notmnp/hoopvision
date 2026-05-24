@@ -1,4 +1,4 @@
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import date
 from typing import Any
 
@@ -18,6 +18,16 @@ from .nba_stats_client import (
 TRACKING_ERA_START_SEASON = 2013
 SUFFICIENT_SAMPLE_POSSESSIONS = 50
 HEIGHT_BUCKETS = ("guard", "wing", "big", "center")
+
+# No nba_api endpoint supplies zone-level shot data conditioned on defender
+# size (see docs/spikes/wo-16-defender-conditioned-zone-data.md). ShotChartDetail
+# carries shot locations but no defender filter, so zone_data reflects a player's
+# career-average shot distribution against all defenders, not against the
+# requested height bucket.
+ZONE_DATA_UNCONDITIONED_WARNING = (
+    "Zone shot data is not conditioned on defender height; frequencies and "
+    "efficiencies reflect career-average shot distribution against all defenders."
+)
 
 
 @dataclass(frozen=True)
@@ -48,6 +58,7 @@ class MatchupConditionedStats:
     blocks: int
     zone_data: list[ZoneShotData]
     height_bucket: str
+    data_warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -98,7 +109,8 @@ class MatchupDataService:
                 for row in conditioned_rows
             )
         )
-        zone_data = self._fetch_zone_data(player_id, normalized_bucket)
+        zone_data = self._fetch_zone_data(player_id)
+        data_warnings = [ZONE_DATA_UNCONDITIONED_WARNING] if zone_data else []
         return MatchupConditionedStats(
             sufficient_sample=possession_count >= SUFFICIENT_SAMPLE_POSSESSIONS,
             possession_count=possession_count,
@@ -110,6 +122,7 @@ class MatchupDataService:
             blocks=blocks,
             zone_data=zone_data,
             height_bucket=normalized_bucket,
+            data_warnings=data_warnings,
         )
 
     def _fetch_tracking_matchups(self, player_id: int) -> list[dict[str, Any]]:
@@ -132,12 +145,15 @@ class MatchupDataService:
     def _fetch_zone_data(
         self,
         player_id: int,
-        height_bucket: str,
     ) -> list[ZoneShotData]:
+        # ShotChartDetail has no defender filter, so the result is identical
+        # regardless of the requested height bucket. The cache key omits the
+        # bucket so the same player-season is fetched and cached once, not four
+        # times. The undifferentiated nature is surfaced via data_warnings.
         rows: list[dict[str, Any]] = []
         for season in self._tracking_seasons():
             data = fetch_stats_data(
-                f"shotchartdetail:{season}:{player_id}:{height_bucket}",
+                f"shotchartdetail:{season}:{player_id}",
                 lambda season=season: shotchartdetail.ShotChartDetail(
                     team_id=0,
                     player_id=player_id,

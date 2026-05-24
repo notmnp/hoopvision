@@ -67,7 +67,7 @@ class MatchupDataServiceTest(unittest.TestCase):
                 "commonplayerinfo:10": {"CommonPlayerInfo": [{"HEIGHT": "6-5"}]},
                 "commonplayerinfo:11": {"CommonPlayerInfo": [{"HEIGHT": "6-7"}]},
                 "commonplayerinfo:12": {"CommonPlayerInfo": [{"HEIGHT": "7-0"}]},
-                "shotchartdetail:2024:203999:wing": {
+                "shotchartdetail:2024:203999": {
                     "Shot_Chart_Detail": [
                         {
                             "SHOT_ATTEMPTED_FLAG": 1,
@@ -102,6 +102,9 @@ class MatchupDataServiceTest(unittest.TestCase):
         self.assertEqual(stats.height_bucket, "wing")
         self.assertEqual(len(stats.zone_data), 2)
         self.assertAlmostEqual(sum(zone.frequency for zone in stats.zone_data), 1.0)
+        self.assertIn(
+            matchup_data.ZONE_DATA_UNCONDITIONED_WARNING, stats.data_warnings
+        )
 
     def test_returns_empty_payload_when_no_tracking_rows_match_bucket(self):
         with patch.object(MatchupDataService, "_tracking_seasons", return_value=[2024]):
@@ -119,7 +122,8 @@ class MatchupDataServiceTest(unittest.TestCase):
         self.assertFalse(stats.sufficient_sample)
         self.assertEqual(stats.possession_count, 0)
         self.assertEqual(stats.zone_data, [])
-        self.assertNotIn("shotchartdetail:2024:893:guard", self.requested_keys)
+        self.assertEqual(stats.data_warnings, [])
+        self.assertNotIn("shotchartdetail:2024:893", self.requested_keys)
 
     def test_marks_sparse_samples_as_insufficient(self):
         with patch.object(MatchupDataService, "_tracking_seasons", return_value=[2024]):
@@ -130,7 +134,7 @@ class MatchupDataServiceTest(unittest.TestCase):
                     ]
                 },
                 "commonplayerinfo:10": {"CommonPlayerInfo": [{"HEIGHT": "6-4"}]},
-                "shotchartdetail:2024:203999:guard": {"Shot_Chart_Detail": []},
+                "shotchartdetail:2024:203999": {"Shot_Chart_Detail": []},
             }
 
             stats = self.service.get_matchup_stats(203999, "guard")

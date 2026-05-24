@@ -197,6 +197,9 @@ class TendencyProfileBuilder:
                     f"profile was used: {error}"
                 )
 
+        if observed_stats:
+            data_warnings.extend(observed_stats.data_warnings)
+
         observed_weight = 0.0
         if observed_stats and observed_stats.possession_count > 0:
             observed_output = self._observed_output(observed_stats, features)
