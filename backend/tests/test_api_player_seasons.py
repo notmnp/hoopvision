@@ -15,6 +15,8 @@ SEASON_STATS = {
     "season_id": "2023-24",
     "season_label": "2023-24",
     "season_year": 2023,
+    "team_id": 1610612747,
+    "team_abbreviation": "LAL",
     "points_per_game": 20.0,
     "fga_per_game": 15.0,
     "three_point_attempt_rate": 0.3333,

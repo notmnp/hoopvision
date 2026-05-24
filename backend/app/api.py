@@ -112,6 +112,8 @@ class PlayerSeasonStats(BaseModel):
     season_id: str
     season_label: str
     season_year: int
+    team_id: int
+    team_abbreviation: str
     points_per_game: float
     fga_per_game: float
     three_point_attempt_rate: float

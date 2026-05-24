@@ -85,7 +85,12 @@ def aggregate_season_totals(
     return totals_by_season
 
 
-def season_stats_from_totals(season_id: str, totals: dict[str, float]) -> dict[str, Any]:
+def season_stats_from_totals(
+    season_id: str,
+    totals: dict[str, float],
+    team_id: int = 0,
+    team_abbreviation: str = "",
+) -> dict[str, Any]:
     """Build the per-game season stat payload from a season's combined totals."""
     games = totals.get("GP", 0) or 0
     season_year = _season_start_year(season_id)
@@ -93,6 +98,8 @@ def season_stats_from_totals(season_id: str, totals: dict[str, float]) -> dict[s
         "season_id": season_id,
         "season_label": season_id,
         "season_year": season_year,
+        "team_id": team_id,
+        "team_abbreviation": team_abbreviation,
         "points_per_game": _per_game(totals.get("PTS"), games),
         "fga_per_game": _per_game(totals.get("FGA"), games),
         "three_point_attempt_rate": _safe_rate(totals.get("FG3A"), totals.get("FGA")),
@@ -103,6 +110,29 @@ def season_stats_from_totals(season_id: str, totals: dict[str, float]) -> dict[s
         "block_per_game": _per_game(totals.get("BLK"), games),
         "steal_per_game": _per_game(totals.get("STL"), games),
     }
+
+
+def _primary_team(
+    season_rows: list[dict[str, Any]], season_id: str
+) -> tuple[int, str]:
+    """Resolve the team a player most represented in a season.
+
+    For a season split across teams (a "TOT" combined row plus per-team rows),
+    the team the player logged the most games for is used for branding, since
+    "TOT" itself has no team identity (TEAM_ID 0).
+    """
+    rows = [row for row in season_rows if _season_id(row) == season_id]
+    team_rows = [
+        row for row in rows if str(row.get("TEAM_ABBREVIATION") or "") != "TOT"
+    ]
+    candidates = team_rows or rows
+    if not candidates:
+        return 0, ""
+    best = max(candidates, key=lambda row: _to_float(row.get("GP")))
+    return (
+        int(_to_float(best.get("TEAM_ID"))),
+        str(best.get("TEAM_ABBREVIATION") or ""),
+    )
 
 
 def list_player_seasons(player_id: int) -> list[dict[str, str]]:
@@ -126,7 +156,8 @@ def get_player_season_stats(player_id: int, season_id: str) -> dict[str, Any] | 
     totals = totals_by_season.get(season_id)
     if totals is None:
         return None
-    return season_stats_from_totals(season_id, totals)
+    team_id, team_abbreviation = _primary_team(season_rows, season_id)
+    return season_stats_from_totals(season_id, totals, team_id, team_abbreviation)
 
 
 def _season_id(row: dict[str, Any]) -> str | None:

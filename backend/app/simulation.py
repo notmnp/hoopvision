@@ -128,16 +128,22 @@ class SimulationEngine:
         season_b_id: str,
         n: int,
         possession_mode: str = "make_it_take_it",
+        seed: int | None = None,
     ) -> dict[str, Any]:
         matchup = self._prepare_matchup(
             player_a_id, player_b_id, season_a_id, season_b_id
         )
+        # A single RNG drives the whole batch. Left unseeded (seed=None) it draws
+        # fresh system entropy, so each run is an independently generated — yet
+        # statistically similar — Monte Carlo estimate (AC-ISO-002.6); pass a
+        # seed only when a reproducible batch is wanted.
+        rng = random.Random(seed)
         player_a_wins = 0
         player_b_wins = 0
         ties = 0
-        for seed in range(n):
+        for _ in range(n):
             scores, _, _ = self._run_possessions(
-                matchup, random.Random(seed), possession_mode
+                matchup, rng, possession_mode
             )
             if scores["a"] > scores["b"]:
                 player_a_wins += 1

@@ -8,6 +8,7 @@ CAREER_ROWS = [
     {
         "SEASON_ID": "2022-23",
         "TEAM_ABBREVIATION": "LAL",
+        "TEAM_ID": 1610612747,
         "GP": 50,
         "PTS": 1000,
         "FGA": 800,
@@ -22,6 +23,7 @@ CAREER_ROWS = [
     {
         "SEASON_ID": "2023-24",
         "TEAM_ABBREVIATION": "LAL",
+        "TEAM_ID": 1610612747,
         "GP": 40,
         "PTS": 800,
         "FGA": 600,
@@ -36,6 +38,7 @@ CAREER_ROWS = [
     {
         "SEASON_ID": "2023-24",
         "TEAM_ABBREVIATION": "TOT",
+        "TEAM_ID": 0,
         "GP": 70,
         "PTS": 1400,
         "FGA": 1050,
@@ -50,6 +53,7 @@ CAREER_ROWS = [
     {
         "SEASON_ID": "2023-24",
         "TEAM_ABBREVIATION": "MIA",
+        "TEAM_ID": 1610612748,
         "GP": 30,
         "PTS": 600,
         "FGA": 450,
@@ -89,6 +93,10 @@ class PlayerDataTest(unittest.TestCase):
         self.assertEqual(stats["fga_per_game"], 15.0)
         self.assertEqual(stats["three_point_attempt_rate"], round(350 / 1050, 4))
         self.assertEqual(stats["free_throw_attempt_rate"], round(280 / 1050, 4))
+        # The branding team is the one with the most games (LAL 40 > MIA 30),
+        # not the teamless TOT row.
+        self.assertEqual(stats["team_abbreviation"], "LAL")
+        self.assertEqual(stats["team_id"], 1610612747)
 
     def test_get_player_season_stats_sums_when_no_tot_row(self):
         with patch.object(
