@@ -5,21 +5,17 @@ from typing import Any
 
 import joblib
 import numpy as np
-from nba_api.stats.endpoints import playercareerstats
 
 from .era_adjustment import EraAdjustmentService, era_adjustment_service
 from .matchup_data import (
     HEIGHT_BUCKETS,
+    TRACKING_ERA_START_SEASON,
     MatchupConditionedStats,
     MatchupDataService,
     ZoneShotData,
     matchup_data_service,
 )
-from .nba_stats_client import (
-    NBA_STATS_HEADERS,
-    NBA_STATS_TIMEOUT_SECONDS,
-    fetch_stats_data,
-)
+from .player_data import get_player_season_stats
 
 
 logger = logging.getLogger(__name__)
@@ -154,36 +150,37 @@ class TendencyProfileBuilder:
     def build_profile(
         self,
         player_id: int,
-        height_bucket: str | int | None = "wing",
-        career_start_year: int | str | None = None,
-        career_end_year: int | str | None = None,
+        height_bucket: str | None = "wing",
+        season_id: str | None = None,
     ) -> TendencyProfile:
-        height_bucket, career_start_year, career_end_year = self._normalize_arguments(
-            height_bucket,
-            career_start_year,
-            career_end_year,
-        )
+        height_bucket = self._normalize_height_bucket(height_bucket)
+        season_year = self._parse_season_year(season_id)
         fetch_warning = None
+        season_stats = None
         try:
-            season_rows = self._fetch_regular_season_rows(player_id)
+            if season_id is not None:
+                season_stats = self._fetch_season_stats(player_id, season_id)
         except Exception as error:
-            season_rows = []
+            season_stats = None
             fetch_warning = (
-                "NBA Stats career lookup failed, so league-average tendency "
+                "NBA Stats season lookup failed, so league-average tendency "
                 f"inputs were substituted: {error}"
             )
 
         features, era_adjustment, data_warnings = self._build_model_input(
-            season_rows,
+            season_stats,
             height_bucket,
-            career_start_year,
-            career_end_year,
+            season_year,
         )
         if fetch_warning:
             data_warnings.insert(0, fetch_warning)
 
         prediction = self._predict(features)
-        post_tracking_player = self._has_tracking_era_season(season_rows)
+        # Observed matchup data only exists for tracking-era seasons (2013+);
+        # for an earlier selected season the model-only profile is used.
+        post_tracking_player = (
+            season_year is not None and season_year >= TRACKING_ERA_START_SEASON
+        )
         observed_stats = None
         if post_tracking_player:
             try:
@@ -253,17 +250,14 @@ class TendencyProfileBuilder:
 
     def _build_model_input(
         self,
-        season_rows: list[dict[str, Any]],
+        season_stats: dict[str, Any] | None,
         height_bucket: str,
-        career_start_year: int | str | None,
-        career_end_year: int | str | None,
+        season_year: int | None,
     ) -> tuple[dict[str, float], Any, list[str]]:
-        features, data_warnings = self._extract_features(season_rows)
-        inferred_start, inferred_end = self._career_year_range(season_rows)
-        era_adjustment = self.era_service.get_adjustment(
-            career_start_year or inferred_start,
-            career_end_year or inferred_end,
-        )
+        features, data_warnings = self._extract_features(season_stats)
+        # A single season belongs to exactly one era, so the season's start year
+        # is passed for both ends of the adjustment lookup.
+        era_adjustment = self.era_service.get_adjustment(season_year, season_year)
         features["height_bucket_ordinal"] = float(HEIGHT_BUCKET_ORDINAL[height_bucket])
         features["pace_multiplier"] = era_adjustment.pace_multiplier
         features["scoring_environment_multiplier"] = (
@@ -277,25 +271,17 @@ class TendencyProfileBuilder:
             return {column: float(prediction[column]) for column in OUTPUT_COLUMNS}
         return dict(zip(OUTPUT_COLUMNS, prediction, strict=True))
 
-    def _fetch_regular_season_rows(self, player_id: int) -> list[dict[str, Any]]:
-        data = fetch_stats_data(
-            f"playercareerstats:{player_id}:totals",
-            lambda: playercareerstats.PlayerCareerStats(
-                player_id=player_id,
-                headers=NBA_STATS_HEADERS.copy(),
-                timeout=NBA_STATS_TIMEOUT_SECONDS,
-            ),
-        )
-        return data.get("SeasonTotalsRegularSeason", [])
+    def _fetch_season_stats(
+        self, player_id: int, season_id: str
+    ) -> dict[str, Any] | None:
+        return get_player_season_stats(player_id, season_id)
 
     def _extract_features(
-        self, season_rows: list[dict[str, Any]]
+        self, season_stats: dict[str, Any] | None
     ) -> tuple[dict[str, float], list[str]]:
         data_warnings: list[str] = []
-        totals = self._sum_totals(season_rows)
-        games = totals.get("GP", 0)
 
-        if games <= 0:
+        if not season_stats:
             data_warnings.append(
                 "League-average tendency inputs substituted because no regular-season stats were found."
             )
@@ -307,19 +293,15 @@ class TendencyProfileBuilder:
             }, data_warnings
 
         features = {
-            "points_per_game": self._per_game(totals, "PTS", games),
-            "fga_per_game": self._per_game(totals, "FGA", games),
-            "three_point_attempt_rate": self._safe_rate(
-                totals.get("FG3A"), totals.get("FGA")
-            ),
-            "free_throw_attempt_rate": self._safe_rate(
-                totals.get("FTA"), totals.get("FGA")
-            ),
-            "assist_per_game": self._per_game(totals, "AST", games),
-            "turnover_per_game": self._per_game(totals, "TOV", games),
-            "rebound_per_game": self._per_game(totals, "REB", games),
-            "block_per_game": self._per_game(totals, "BLK", games),
-            "steal_per_game": self._per_game(totals, "STL", games),
+            "points_per_game": float(season_stats["points_per_game"]),
+            "fga_per_game": float(season_stats["fga_per_game"]),
+            "three_point_attempt_rate": float(season_stats["three_point_attempt_rate"]),
+            "free_throw_attempt_rate": float(season_stats["free_throw_attempt_rate"]),
+            "assist_per_game": float(season_stats["assist_per_game"]),
+            "turnover_per_game": float(season_stats["turnover_per_game"]),
+            "rebound_per_game": float(season_stats["rebound_per_game"]),
+            "block_per_game": float(season_stats["block_per_game"]),
+            "steal_per_game": float(season_stats["steal_per_game"]),
             "height_bucket_ordinal": 1.0,
             "pace_multiplier": 1.0,
             "scoring_environment_multiplier": 1.0,
@@ -454,79 +436,28 @@ class TendencyProfileBuilder:
         return "LOW"
 
     @staticmethod
-    def _sum_totals(season_rows: list[dict[str, Any]]) -> dict[str, float]:
-        columns = ("GP", "PTS", "FGA", "FG3A", "FTA", "AST", "TOV", "REB", "BLK", "STL")
-        return {
-            column: sum(
-                TendencyProfileBuilder._to_float(row.get(column)) for row in season_rows
+    def _normalize_height_bucket(height_bucket: str | None) -> str:
+        if height_bucket is None:
+            return "wing"
+        normalized_bucket = str(height_bucket).strip().lower()
+        if normalized_bucket not in HEIGHT_BUCKETS:
+            raise ValueError(
+                f"height_bucket must be one of {', '.join(HEIGHT_BUCKETS)}"
             )
-            for column in columns
-        }
+        return normalized_bucket
 
     @staticmethod
-    def _career_year_range(
-        season_rows: list[dict[str, Any]]
-    ) -> tuple[int | None, int | None]:
-        years = []
-        for row in season_rows:
-            season_id = str(row.get("SEASON_ID") or "")
-            if len(season_id) >= 4 and season_id[:4].isdigit():
-                years.append(int(season_id[:4]))
-
-        if not years:
-            return None, None
-        return min(years), max(years) + 1
-
-    @staticmethod
-    def _has_tracking_era_season(season_rows: list[dict[str, Any]]) -> bool:
-        for row in season_rows:
-            season_id = str(row.get("SEASON_ID") or "")
-            if len(season_id) >= 4 and season_id[:4].isdigit():
-                if int(season_id[:4]) >= 2013:
-                    return True
-        return False
-
-    @staticmethod
-    def _normalize_arguments(
-        height_bucket: str | int | None,
-        career_start_year: int | str | None,
-        career_end_year: int | str | None,
-    ) -> tuple[str, int | str | None, int | str | None]:
-        if isinstance(height_bucket, str):
-            normalized_bucket = height_bucket.strip().lower()
-            if normalized_bucket in HEIGHT_BUCKETS:
-                return normalized_bucket, career_start_year, career_end_year
-            if not normalized_bucket.isdigit():
-                raise ValueError(
-                    f"height_bucket must be one of {', '.join(HEIGHT_BUCKETS)}"
-                )
-
-        if height_bucket is not None:
-            return "wing", height_bucket, career_start_year
-        return "wing", career_start_year, career_end_year
-
-    @staticmethod
-    def _per_game(totals: dict[str, float], column: str, games: float) -> float:
-        return round(totals.get(column, 0) / games, 4)
-
-    @staticmethod
-    def _safe_rate(numerator: float | None, denominator: float | None) -> float:
-        if not denominator:
-            return 0.0
-        return round((numerator or 0) / denominator, 4)
+    def _parse_season_year(season_id: str | None) -> int | None:
+        if not season_id:
+            return None
+        prefix = str(season_id)[:4]
+        return int(prefix) if prefix.isdigit() else None
 
     @staticmethod
     def _efficiency(values: dict[str, int]) -> float:
         if values["fga"] <= 0:
             return 0.0
         return round(values["fgm"] / values["fga"], 4)
-
-    @staticmethod
-    def _to_float(value: Any) -> float:
-        try:
-            return float(value or 0)
-        except (TypeError, ValueError):
-            return 0.0
 
     @staticmethod
     def _normalize_distribution(values: dict[str, float]) -> dict[str, float]:

@@ -1,14 +1,21 @@
+import random
 import unittest
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from backend.app import api
-from backend.app.simulation import SimulationEngine
+from backend.app.simulation import PlayByPlay, PlayerSimStats, SimulationEngine
 from backend.app.tendency_profile import TendencyProfile
 
 
-def make_profile(player_id, three_frequency=0.2, confidence_tier="MEDIUM"):
+SEASON_A = "2000-01"
+SEASON_B = "2010-11"
+
+
+def make_profile(
+    player_id, three_frequency=0.2, confidence_tier="MEDIUM", foul_drawing_rate=0.10
+):
     return TendencyProfile(
         player_id=player_id,
         model_version="test",
@@ -22,7 +29,7 @@ def make_profile(player_id, three_frequency=0.2, confidence_tier="MEDIUM"):
             "mid_range": 0.45,
             "three": 0.36,
         },
-        foul_drawing_rate=0.10,
+        foul_drawing_rate=foul_drawing_rate,
         turnover_rate=0.08,
         era_adjustment={"era_key": "modern_spacing"},
         data_warnings=[],
@@ -31,28 +38,23 @@ def make_profile(player_id, three_frequency=0.2, confidence_tier="MEDIUM"):
 
 
 class StubProfileBuilder:
-    def __init__(self, confidence_tiers=None):
+    def __init__(self, confidence_tiers=None, foul_drawing_rate=0.10):
         self.calls = []
         self.confidence_tiers = confidence_tiers or {}
+        self.foul_drawing_rate = foul_drawing_rate
 
-    def build_profile(
-        self,
-        player_id,
-        height_bucket="wing",
-        career_start_year=None,
-        career_end_year=None,
-    ):
+    def build_profile(self, player_id, height_bucket="wing", season_id=None):
         self.calls.append(
             {
                 "player_id": player_id,
                 "height_bucket": height_bucket,
-                "career_start_year": career_start_year,
-                "career_end_year": career_end_year,
+                "season_id": season_id,
             }
         )
         return make_profile(
             player_id,
             confidence_tier=self.confidence_tiers.get(player_id, "MEDIUM"),
+            foul_drawing_rate=self.foul_drawing_rate,
         )
 
 
@@ -83,22 +85,91 @@ class SimulationEngineTest(unittest.TestCase):
         self.profile_builder = StubProfileBuilder()
         self.engine = SimulationEngine(self.players.get, self.profile_builder)
 
-    def test_simulation_runs_to_21_and_alternates_possessions(self):
-        result = self.engine.simulate(1, 2, seed=42)
+    def test_simulation_runs_to_21_starting_with_player_a(self):
+        result = self.engine.simulate(1, 2, SEASON_A, SEASON_B, seed=42)
 
         self.assertGreaterEqual(max(result["summary"]["final_score"].values()), 21)
         self.assertEqual(result["play_by_play"][0]["offensive_player"], "Player A")
-        self.assertEqual(result["play_by_play"][1]["offensive_player"], "Player B")
         self.assertIn(result["summary"]["winner"], {"Player A", "Player B"})
 
+    def test_alternating_mode_alternates_possessions(self):
+        # With no fouls, alternating mode flips possession every turn.
+        profile_builder = StubProfileBuilder(foul_drawing_rate=0.0)
+        engine = SimulationEngine(self.players.get, profile_builder)
+
+        result = engine.simulate(
+            1, 2, SEASON_A, SEASON_B, possession_mode="alternating", seed=42
+        )
+
+        offensive_players = [
+            play["offensive_player"] for play in result["play_by_play"]
+        ]
+        expected = [
+            "Player A" if index % 2 == 0 else "Player B"
+            for index in range(len(offensive_players))
+        ]
+        self.assertEqual(offensive_players, expected)
+
+    def test_make_it_take_it_scorer_retains_possession(self):
+        # A made basket keeps possession; a miss/turnover transfers it.
+        made = PlayByPlay(1, "Player A", "rim", "made", False, False, 2, 0)
+        missed = PlayByPlay(1, "Player A", "rim", "missed", False, False, 0, 0)
+        turnover = PlayByPlay(1, "Player A", "rim", "turnover", False, True, 0, 0)
+
+        self.assertEqual(
+            self.engine._next_possessor("a", made, "make_it_take_it"), "a"
+        )
+        self.assertEqual(
+            self.engine._next_possessor("a", missed, "make_it_take_it"), "b"
+        )
+        self.assertEqual(
+            self.engine._next_possessor("a", turnover, "make_it_take_it"), "b"
+        )
+
+    def test_foul_retains_possession_in_both_modes(self):
+        foul = PlayByPlay(1, "Player A", "rim", "foul_drawn", True, False, 0, 0)
+
+        self.assertEqual(
+            self.engine._next_possessor("a", foul, "make_it_take_it"), "a"
+        )
+        self.assertEqual(self.engine._next_possessor("a", foul, "alternating"), "a")
+
+    def test_foul_awards_no_points_and_records_foul_drawn(self):
+        # foul_drawing_rate of 1.0 (and no turnover) forces a foul this turn.
+        tendency = make_profile(1, foul_drawing_rate=1.0).to_dict()
+        tendency["turnover_rate"] = 0.0
+        defense = make_profile(2).to_dict()
+        scores = {"a": 0, "b": 0}
+        player_stats = PlayerSimStats()
+
+        play = self.engine._simulate_possession(
+            rng=random.Random(1),
+            possession=1,
+            offense_key="a",
+            offense=self.players[1],
+            defense=self.players[2],
+            tendency=tendency,
+            defense_tendency=defense,
+            scores=scores,
+            player_stats=player_stats,
+        )
+
+        self.assertTrue(play.foul)
+        self.assertEqual(play.result, "foul_drawn")
+        self.assertEqual(scores, {"a": 0, "b": 0})
+        self.assertEqual(play.score_a, 0)
+        self.assertEqual(play.score_b, 0)
+        self.assertEqual(player_stats.points, 0)
+        self.assertEqual(player_stats.fouls_drawn, 1)
+
     def test_seeded_simulation_is_deterministic(self):
-        first = self.engine.simulate(1, 2, seed=7)
-        second = self.engine.simulate(1, 2, seed=7)
+        first = self.engine.simulate(1, 2, SEASON_A, SEASON_B, seed=7)
+        second = self.engine.simulate(1, 2, SEASON_A, SEASON_B, seed=7)
 
         self.assertEqual(first, second)
 
     def test_simulate_bulk_aggregates_win_counts(self):
-        result = self.engine.simulate_bulk(1, 2, n=25)
+        result = self.engine.simulate_bulk(1, 2, SEASON_A, SEASON_B, n=25)
 
         self.assertEqual(result["total_simulations"], 25)
         self.assertEqual(
@@ -110,13 +181,13 @@ class SimulationEngineTest(unittest.TestCase):
         )
 
     def test_simulate_bulk_builds_profiles_once(self):
-        self.engine.simulate_bulk(1, 2, n=10)
+        self.engine.simulate_bulk(1, 2, SEASON_A, SEASON_B, n=10)
 
         # Profiles are built once per matchup, not once per simulation.
         self.assertEqual(len(self.profile_builder.calls), 2)
 
     def test_player_stats_include_scoring_breakdown(self):
-        result = self.engine.simulate(1, 2, seed=5)
+        result = self.engine.simulate(1, 2, SEASON_A, SEASON_B, seed=5)
 
         for stats in result["summary"]["player_stats"].values():
             self.assertIn("shooting_percentage", stats)
@@ -136,12 +207,10 @@ class SimulationEngineTest(unittest.TestCase):
                 self.assertLessEqual(zone_pct, 1.0)
 
     def test_player_stats_expose_confidence_tier_per_player(self):
-        profile_builder = StubProfileBuilder(
-            confidence_tiers={1: "HIGH", 2: "LOW"}
-        )
+        profile_builder = StubProfileBuilder(confidence_tiers={1: "HIGH", 2: "LOW"})
         engine = SimulationEngine(self.players.get, profile_builder)
 
-        result = engine.simulate(1, 2, seed=5)
+        result = engine.simulate(1, 2, SEASON_A, SEASON_B, seed=5)
 
         player_stats = result["summary"]["player_stats"]
         self.assertEqual(player_stats["Player A"]["confidence_tier"], "HIGH")
@@ -150,7 +219,7 @@ class SimulationEngineTest(unittest.TestCase):
     def test_collects_data_warnings(self):
         self.players[1]["data_warnings"] = ["substituted wingspan"]
 
-        result = self.engine.simulate(1, 2, seed=12)
+        result = self.engine.simulate(1, 2, SEASON_A, SEASON_B, seed=12)
 
         self.assertEqual(result["summary"]["data_warnings"], ["substituted wingspan"])
 
@@ -194,19 +263,30 @@ class SimulationEngineTest(unittest.TestCase):
 
         self.assertGreater(elite, poor)
 
-    def test_passes_opponent_height_bucket_to_profile_builder(self):
+    def test_passes_height_bucket_and_season_id_to_profile_builder(self):
         self.players[1]["height"] = "6-4"
         self.players[2]["height"] = "7-0"
 
-        self.engine.simulate(1, 2, seed=3)
+        self.engine.simulate(1, 2, SEASON_A, SEASON_B, seed=3)
 
         self.assertEqual(self.profile_builder.calls[0]["height_bucket"], "center")
         self.assertEqual(self.profile_builder.calls[1]["height_bucket"], "guard")
-        self.assertEqual(self.profile_builder.calls[0]["career_start_year"], 1990)
-        self.assertEqual(self.profile_builder.calls[1]["career_end_year"], 2024)
+        self.assertEqual(self.profile_builder.calls[0]["season_id"], SEASON_A)
+        self.assertEqual(self.profile_builder.calls[1]["season_id"], SEASON_B)
 
 
 class SimulateEndpointTest(unittest.TestCase):
+    def _payload(self, **overrides):
+        payload = {
+            "player_a_id": 1,
+            "player_b_id": 2,
+            "season_a_id": SEASON_A,
+            "season_b_id": SEASON_B,
+            "seed": 1,
+        }
+        payload.update(overrides)
+        return payload
+
     def test_get_player_normalizes_encoded_spaces_plus_and_extra_spaces(self):
         client = TestClient(api.app)
 
@@ -270,10 +350,20 @@ class SimulateEndpointTest(unittest.TestCase):
 
         response = client.post(
             "/simulate",
-            json={"player_a_id": 1, "player_b_id": 1, "seed": 1},
+            json=self._payload(player_b_id=1),
         )
 
         self.assertEqual(response.status_code, 400)
+
+    def test_post_simulate_requires_season_ids(self):
+        client = TestClient(api.app)
+
+        response = client.post(
+            "/simulate",
+            json={"player_a_id": 1, "player_b_id": 2, "seed": 1},
+        )
+
+        self.assertEqual(response.status_code, 422)
 
     def test_post_simulate_returns_engine_result(self):
         client = TestClient(api.app)
@@ -290,20 +380,31 @@ class SimulateEndpointTest(unittest.TestCase):
         with patch("backend.app.api.SimulationEngine") as engine_class:
             engine_class.return_value.simulate.return_value = expected
 
-            response = client.post(
-                "/simulate",
-                json={"player_a_id": 1, "player_b_id": 2, "seed": 1},
-            )
+            response = client.post("/simulate", json=self._payload())
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), expected)
+        engine_class.return_value.simulate.assert_called_once_with(
+            1,
+            2,
+            SEASON_A,
+            SEASON_B,
+            possession_mode="make_it_take_it",
+            seed=1,
+        )
 
     def test_post_simulate_bulk_validates_distinct_players(self):
         client = TestClient(api.app)
 
         response = client.post(
             "/simulate/bulk",
-            json={"player_a_id": 1, "player_b_id": 1, "n": 10},
+            json={
+                "player_a_id": 1,
+                "player_b_id": 1,
+                "season_a_id": SEASON_A,
+                "season_b_id": SEASON_B,
+                "n": 10,
+            },
         )
 
         self.assertEqual(response.status_code, 400)
@@ -324,13 +425,24 @@ class SimulateEndpointTest(unittest.TestCase):
 
             response = client.post(
                 "/simulate/bulk",
-                json={"player_a_id": 1, "player_b_id": 2, "n": 999999},
+                json={
+                    "player_a_id": 1,
+                    "player_b_id": 2,
+                    "season_a_id": SEASON_A,
+                    "season_b_id": SEASON_B,
+                    "n": 999999,
+                },
             )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), expected)
         engine_class.return_value.simulate_bulk.assert_called_once_with(
-            1, 2, api.BULK_SIM_MAX_N
+            1,
+            2,
+            SEASON_A,
+            SEASON_B,
+            api.BULK_SIM_MAX_N,
+            possession_mode="make_it_take_it",
         )
 
 

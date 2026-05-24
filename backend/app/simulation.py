@@ -107,20 +107,38 @@ class SimulationEngine:
         self.profile_builder = profile_builder
 
     def simulate(
-        self, player_a_id: int, player_b_id: int, seed: int | None = None
+        self,
+        player_a_id: int,
+        player_b_id: int,
+        season_a_id: str,
+        season_b_id: str,
+        possession_mode: str = "make_it_take_it",
+        seed: int | None = None,
     ) -> dict[str, Any]:
-        matchup = self._prepare_matchup(player_a_id, player_b_id)
-        return self._play_game(matchup, random.Random(seed))
+        matchup = self._prepare_matchup(
+            player_a_id, player_b_id, season_a_id, season_b_id
+        )
+        return self._play_game(matchup, random.Random(seed), possession_mode)
 
     def simulate_bulk(
-        self, player_a_id: int, player_b_id: int, n: int
+        self,
+        player_a_id: int,
+        player_b_id: int,
+        season_a_id: str,
+        season_b_id: str,
+        n: int,
+        possession_mode: str = "make_it_take_it",
     ) -> dict[str, Any]:
-        matchup = self._prepare_matchup(player_a_id, player_b_id)
+        matchup = self._prepare_matchup(
+            player_a_id, player_b_id, season_a_id, season_b_id
+        )
         player_a_wins = 0
         player_b_wins = 0
         ties = 0
         for seed in range(n):
-            scores, _, _ = self._run_possessions(matchup, random.Random(seed))
+            scores, _, _ = self._run_possessions(
+                matchup, random.Random(seed), possession_mode
+            )
             if scores["a"] > scores["b"]:
                 player_a_wins += 1
             elif scores["b"] > scores["a"]:
@@ -138,7 +156,11 @@ class SimulationEngine:
         }
 
     def _prepare_matchup(
-        self, player_a_id: int, player_b_id: int
+        self,
+        player_a_id: int,
+        player_b_id: int,
+        season_a_id: str,
+        season_b_id: str,
     ) -> PreparedMatchup:
         player_a = self.profile_provider(player_a_id)
         player_b = self.profile_provider(player_b_id)
@@ -147,14 +169,12 @@ class SimulationEngine:
         profile_a = self.profile_builder.build_profile(
             player_a_id,
             height_bucket=player_a_defender_bucket,
-            career_start_year=player_a.get("from_year"),
-            career_end_year=player_a.get("to_year"),
+            season_id=season_a_id,
         )
         profile_b = self.profile_builder.build_profile(
             player_b_id,
             height_bucket=player_b_defender_bucket,
-            career_start_year=player_b.get("from_year"),
-            career_end_year=player_b.get("to_year"),
+            season_id=season_b_id,
         )
         data_warnings = self._collect_data_warnings(
             player_a, player_b, profile_a, profile_b
@@ -168,7 +188,10 @@ class SimulationEngine:
         )
 
     def _run_possessions(
-        self, matchup: PreparedMatchup, rng: random.Random
+        self,
+        matchup: PreparedMatchup,
+        rng: random.Random,
+        possession_mode: str = "make_it_take_it",
     ) -> tuple[dict[str, int], dict[str, PlayerSimStats], list[PlayByPlay]]:
         player_a, player_b = matchup.player_a, matchup.player_b
         profile_a, profile_b = matchup.profile_a, matchup.profile_b
@@ -179,9 +202,11 @@ class SimulationEngine:
         }
         play_by_play: list[PlayByPlay] = []
 
+        # First possession always belongs to player A; subsequent possession
+        # changes are governed by possession_mode and the prior result.
         possession = 1
+        offense_key = "a"
         while scores["a"] < 21 and scores["b"] < 21:
-            offense_key = "a" if possession % 2 else "b"
             defense_key = "b" if offense_key == "a" else "a"
             offense = player_a if offense_key == "a" else player_b
             defense = player_b if defense_key == "b" else player_a
@@ -201,13 +226,35 @@ class SimulationEngine:
             )
             play_by_play.append(play)
             possession += 1
+            offense_key = self._next_possessor(offense_key, play, possession_mode)
 
         return scores, stats, play_by_play
 
+    @staticmethod
+    def _next_possessor(
+        offense_key: str, play: PlayByPlay, possession_mode: str
+    ) -> str:
+        other_key = "b" if offense_key == "a" else "a"
+        # A drawn foul always returns the ball to the same player for a retry,
+        # in both possession modes (AC-ISO-006.4).
+        if play.foul:
+            return offense_key
+        if possession_mode == "alternating":
+            return other_key
+        # make-it-take-it: scorer keeps possession, otherwise it transfers.
+        if play.result == "made":
+            return offense_key
+        return other_key
+
     def _play_game(
-        self, matchup: PreparedMatchup, rng: random.Random
+        self,
+        matchup: PreparedMatchup,
+        rng: random.Random,
+        possession_mode: str = "make_it_take_it",
     ) -> dict[str, Any]:
-        scores, stats, play_by_play = self._run_possessions(matchup, rng)
+        scores, stats, play_by_play = self._run_possessions(
+            matchup, rng, possession_mode
+        )
         winner_key = "a" if scores["a"] >= 21 else "b"
         winner = (
             matchup.player_a["name"] if winner_key == "a" else matchup.player_b["name"]
@@ -264,9 +311,10 @@ class SimulationEngine:
             )
 
         if rng.random() < tendency["foul_drawing_rate"]:
+            # A drawn foul awards no points and does not change the score; the
+            # fouled player retains possession for a retry (handled by the
+            # possession loop via _next_possessor).
             player_stats.fouls_drawn += 1
-            player_stats.points += 1
-            scores[offense_key] += 1
             return PlayByPlay(
                 possession=possession,
                 offensive_player=offense["name"],

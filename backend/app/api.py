@@ -2,7 +2,7 @@ import csv
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import unquote
 
 from fastapi import FastAPI, HTTPException
@@ -63,9 +63,15 @@ app.add_middleware(
 )
 
 
+PossessionMode = Literal["make_it_take_it", "alternating"]
+
+
 class SimulationRequest(BaseModel):
     player_a_id: int = Field(gt=0)
     player_b_id: int = Field(gt=0)
+    season_a_id: str = Field(min_length=1)
+    season_b_id: str = Field(min_length=1)
+    possession_mode: PossessionMode = "make_it_take_it"
     seed: int | None = None
 
 
@@ -77,6 +83,9 @@ BULK_SIM_MAX_N = int(os.getenv("BULK_SIM_MAX_N", "1000"))
 class BulkSimulationRequest(BaseModel):
     player_a_id: int = Field(gt=0)
     player_b_id: int = Field(gt=0)
+    season_a_id: str = Field(min_length=1)
+    season_b_id: str = Field(min_length=1)
+    possession_mode: PossessionMode = "make_it_take_it"
     n: int = Field(default=1000, gt=0)
 
 
@@ -468,7 +477,10 @@ async def simulate_matchup(request: SimulationRequest):
         return engine.simulate(
             request.player_a_id,
             request.player_b_id,
-            request.seed,
+            request.season_a_id,
+            request.season_b_id,
+            possession_mode=request.possession_mode,
+            seed=request.seed,
         )
     except Exception as e:
         raise HTTPException(
@@ -489,7 +501,14 @@ async def simulate_bulk(request: BulkSimulationRequest):
     n = min(request.n, BULK_SIM_MAX_N)
     try:
         engine = SimulationEngine(profile_provider=_get_player_profile_by_id)
-        return engine.simulate_bulk(request.player_a_id, request.player_b_id, n)
+        return engine.simulate_bulk(
+            request.player_a_id,
+            request.player_b_id,
+            request.season_a_id,
+            request.season_b_id,
+            n,
+            possession_mode=request.possession_mode,
+        )
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to run bulk simulation: {str(e)}"

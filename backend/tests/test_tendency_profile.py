@@ -22,6 +22,26 @@ class DictModel:
         }
 
 
+def season_stats(season_id, **overrides):
+    """Build a per-season `PlayerSeasonStats`-shaped payload for tests."""
+    payload = {
+        "season_id": season_id,
+        "season_label": season_id,
+        "season_year": int(season_id[:4]),
+        "points_per_game": 25.0,
+        "fga_per_game": 18.0,
+        "three_point_attempt_rate": 0.20,
+        "free_throw_attempt_rate": 0.30,
+        "assist_per_game": 5.0,
+        "turnover_per_game": 2.5,
+        "rebound_per_game": 6.0,
+        "block_per_game": 1.0,
+        "steal_per_game": 2.0,
+    }
+    payload.update(overrides)
+    return payload
+
+
 class StubMatchupService:
     def __init__(self, stats=None):
         self.stats = stats
@@ -44,51 +64,22 @@ class StubMatchupService:
 
 
 class StubbedTendencyProfileBuilder(TendencyProfileBuilder):
-    def __init__(self, season_rows, matchup_service=None):
+    def __init__(self, stats_payload, matchup_service=None):
         super().__init__(
             model=DictModel(),
             matchup_service=matchup_service or StubMatchupService(),
         )
-        self.season_rows = season_rows
+        self.stats_payload = stats_payload
 
-    def _fetch_regular_season_rows(self, player_id):
-        return self.season_rows
+    def _fetch_season_stats(self, player_id, season_id):
+        return self.stats_payload
 
 
 class TendencyProfileBuilderTest(unittest.TestCase):
-    def test_builds_profile_from_regular_season_totals(self):
-        builder = StubbedTendencyProfileBuilder(
-            [
-                {
-                    "SEASON_ID": "1990-91",
-                    "GP": 82,
-                    "PTS": 2580,
-                    "FGA": 1837,
-                    "FG3A": 93,
-                    "FTA": 671,
-                    "AST": 453,
-                    "TOV": 202,
-                    "REB": 492,
-                    "BLK": 83,
-                    "STL": 223,
-                },
-                {
-                    "SEASON_ID": "1991-92",
-                    "GP": 80,
-                    "PTS": 2404,
-                    "FGA": 1818,
-                    "FG3A": 100,
-                    "FTA": 590,
-                    "AST": 489,
-                    "TOV": 200,
-                    "REB": 511,
-                    "BLK": 75,
-                    "STL": 182,
-                },
-            ]
-        )
+    def test_builds_profile_from_season_stats(self):
+        builder = StubbedTendencyProfileBuilder(season_stats("1990-91"))
 
-        profile = builder.build_profile(player_id=23)
+        profile = builder.build_profile(player_id=23, season_id="1990-91")
 
         self.assertEqual(profile.player_id, 23)
         self.assertEqual(profile.era_adjustment["era_key"], "physical_half_court")
@@ -96,13 +87,15 @@ class TendencyProfileBuilderTest(unittest.TestCase):
             sum(profile.shot_type_distribution.values()), 1.0, places=4
         )
         self.assertIn("rim", profile.scoring_efficiency_by_shot_type)
+        # A pre-tracking-era season has no observed matchup data, so confidence
+        # is LOW.
         self.assertEqual(profile.confidence_tier, "LOW")
         self.assertTrue(
             any("confidence is LOW" in warning for warning in profile.data_warnings)
         )
 
-    def test_uses_league_average_fallback_when_stats_are_missing(self):
-        builder = StubbedTendencyProfileBuilder([])
+    def test_uses_league_average_fallback_when_no_season_selected(self):
+        builder = StubbedTendencyProfileBuilder(None)
 
         profile = builder.build_profile(player_id=999)
 
@@ -114,15 +107,21 @@ class TendencyProfileBuilderTest(unittest.TestCase):
 
     def test_uses_league_average_fallback_when_stats_fetch_fails(self):
         class FailingTendencyProfileBuilder(TendencyProfileBuilder):
-            def _fetch_regular_season_rows(self, player_id):
+            def __init__(self):
+                super().__init__(
+                    model=DictModel(),
+                    matchup_service=StubMatchupService(),
+                )
+
+            def _fetch_season_stats(self, player_id, season_id):
                 raise TimeoutError("stats.nba.com timed out")
 
         builder = FailingTendencyProfileBuilder()
 
-        profile = builder.build_profile(player_id=999)
+        profile = builder.build_profile(player_id=999, season_id="2023-24")
 
         self.assertEqual(profile.era_adjustment["era_key"], "modern_spacing")
-        self.assertIn("NBA Stats career lookup failed", profile.data_warnings[0])
+        self.assertIn("NBA Stats season lookup failed", profile.data_warnings[0])
         self.assertTrue(
             any(
                 "League-average tendency inputs substituted" in warning
@@ -133,48 +132,32 @@ class TendencyProfileBuilderTest(unittest.TestCase):
             sum(profile.shot_type_distribution.values()), 1.0, places=4
         )
 
-    def test_accepts_explicit_career_years_for_era_adjustment(self):
-        builder = StubbedTendencyProfileBuilder([])
+    def test_season_id_drives_era_adjustment(self):
+        builder = StubbedTendencyProfileBuilder(season_stats("1965-66"))
 
-        profile = builder.build_profile(
-            player_id=999,
-            career_start_year=1960,
-            career_end_year=1969,
-        )
+        profile = builder.build_profile(player_id=999, season_id="1965-66")
 
         self.assertEqual(
             profile.era_adjustment["era_key"], "pace_and_space_predecessor"
         )
 
     def test_accepts_height_bucket_for_model_input(self):
-        builder = StubbedTendencyProfileBuilder(
-            [
-                {
-                    "SEASON_ID": "2023-24",
-                    "GP": 70,
-                    "PTS": 1400,
-                    "FGA": 1050,
-                    "FG3A": 350,
-                    "FTA": 280,
-                    "AST": 280,
-                    "TOV": 140,
-                    "REB": 420,
-                    "BLK": 35,
-                    "STL": 70,
-                }
-            ]
-        )
+        builder = StubbedTendencyProfileBuilder(season_stats("2023-24"))
 
-        profile = builder.build_profile(player_id=203999, height_bucket="center")
+        profile = builder.build_profile(
+            player_id=203999, height_bucket="center", season_id="2023-24"
+        )
 
         self.assertEqual(profile.height_bucket, "center")
         self.assertEqual(profile.confidence_tier, "MEDIUM")
 
     def test_rejects_unknown_height_bucket(self):
-        builder = StubbedTendencyProfileBuilder([])
+        builder = StubbedTendencyProfileBuilder(None)
 
         with self.assertRaisesRegex(ValueError, "height_bucket"):
-            builder.build_profile(player_id=203999, height_bucket="forward")
+            builder.build_profile(
+                player_id=203999, height_bucket="forward", season_id="2023-24"
+            )
 
     def test_blends_observed_matchup_data_with_model_prediction(self):
         matchup_service = StubMatchupService(
@@ -215,25 +198,13 @@ class TendencyProfileBuilderTest(unittest.TestCase):
             )
         )
         builder = StubbedTendencyProfileBuilder(
-            [
-                {
-                    "SEASON_ID": "2023-24",
-                    "GP": 70,
-                    "PTS": 1400,
-                    "FGA": 1050,
-                    "FG3A": 350,
-                    "FTA": 280,
-                    "AST": 280,
-                    "TOV": 140,
-                    "REB": 420,
-                    "BLK": 35,
-                    "STL": 70,
-                }
-            ],
+            season_stats("2023-24"),
             matchup_service=matchup_service,
         )
 
-        profile = builder.build_profile(player_id=203999, height_bucket="guard")
+        profile = builder.build_profile(
+            player_id=203999, height_bucket="guard", season_id="2023-24"
+        )
 
         self.assertEqual(matchup_service.calls, [(203999, "guard")])
         self.assertEqual(profile.confidence_tier, "HIGH")
