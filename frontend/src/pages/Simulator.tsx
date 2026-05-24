@@ -1,12 +1,23 @@
-import { CSSProperties, FormEvent, ReactNode, useState } from "react"
+import {
+  CSSProperties,
+  FormEvent,
+  ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react"
 import axios from "axios"
 import { API_BASE_URL } from "@/lib/config"
 import {
   AlertTriangle,
+  CalendarDays,
+  FastForward,
   Loader2,
   Percent,
+  Repeat,
   RotateCcw,
   Search,
+  Shuffle,
   Swords,
   Trophy,
   UserRound,
@@ -34,8 +45,27 @@ import {
   PlayerProfile,
   usePlayerSearch,
 } from "@/hooks/usePlayerSearch"
+import {
+  PlayerSeasonStats,
+  usePlayerSeasons,
+  usePlayerSeasonStats,
+} from "@/hooks/usePlayerSeasons"
 
 type SlotLabel = "Player A" | "Player B"
+
+type PossessionMode = "make_it_take_it" | "alternating"
+
+const POSSESSION_MODES: {
+  value: PossessionMode
+  label: string
+  icon: typeof Repeat
+}[] = [
+  { value: "make_it_take_it", label: "Make it, take it", icon: Repeat },
+  { value: "alternating", label: "Alternating", icon: Shuffle },
+]
+
+// One revealed possession per tick while the play-by-play log animates in.
+const PLAY_BY_PLAY_TICK_MS = 120
 
 type ConfidenceTier = "HIGH" | "MEDIUM" | "LOW"
 
@@ -105,8 +135,10 @@ const BULK_SIM_COUNT = 1000
 interface PlayerSlotProps {
   label: SlotLabel
   selectedPlayer: PlayerProfile | null
+  selectedSeason: string | null
   onSelect: (player: PlayerProfile) => void
   onClear: () => void
+  onSeasonSelect: (seasonId: string | null) => void
   winPct?: number | null
   confidenceTier?: ConfidenceTier | null
 }
@@ -114,27 +146,49 @@ interface PlayerSlotProps {
 function PlayerSelectionController() {
   const [playerA, setPlayerA] = useState<PlayerProfile | null>(null)
   const [playerB, setPlayerB] = useState<PlayerProfile | null>(null)
+  const [seasonA, setSeasonA] = useState<string | null>(null)
+  const [seasonB, setSeasonB] = useState<string | null>(null)
+  const [possessionMode, setPossessionMode] =
+    useState<PossessionMode>("make_it_take_it")
   const [simulationResult, setSimulationResult] =
     useState<SimulationResult | null>(null)
   const [simulationLoading, setSimulationLoading] = useState(false)
   const [simulationError, setSimulationError] = useState<string | null>(null)
   const [bulkResult, setBulkResult] = useState<BulkSimulationResult | null>(null)
   const [bulkLoading, setBulkLoading] = useState(false)
-  const canRunSimulation = Boolean(playerA && playerB)
+  // A matchup is only runnable once both players are confirmed AND each has a
+  // season selected (AC-ISO-001.6 / AC-ISO-006.1).
+  const canRunSimulation = Boolean(playerA && playerB && seasonA && seasonB)
   const busy = simulationLoading || bulkLoading
 
   function selectPlayerA(player: PlayerProfile | null) {
     setPlayerA(player)
+    setSeasonA(null)
     setBulkResult(null)
+    setSimulationResult(null)
   }
 
   function selectPlayerB(player: PlayerProfile | null) {
     setPlayerB(player)
+    setSeasonB(null)
     setBulkResult(null)
+    setSimulationResult(null)
+  }
+
+  function selectSeasonA(seasonId: string | null) {
+    setSeasonA(seasonId)
+    setBulkResult(null)
+    setSimulationResult(null)
+  }
+
+  function selectSeasonB(seasonId: string | null) {
+    setSeasonB(seasonId)
+    setBulkResult(null)
+    setSimulationResult(null)
   }
 
   async function runSimulation() {
-    if (!playerA || !playerB) {
+    if (!playerA || !playerB || !seasonA || !seasonB) {
       return
     }
 
@@ -147,6 +201,9 @@ function PlayerSelectionController() {
         {
           player_a_id: playerA.player_id,
           player_b_id: playerB.player_id,
+          season_a_id: seasonA,
+          season_b_id: seasonB,
+          possession_mode: possessionMode,
         }
       )
       setSimulationResult(response.data)
@@ -158,7 +215,7 @@ function PlayerSelectionController() {
   }
 
   async function runBulkSimulation() {
-    if (!playerA || !playerB) {
+    if (!playerA || !playerB || !seasonA || !seasonB) {
       return
     }
 
@@ -171,6 +228,9 @@ function PlayerSelectionController() {
         {
           player_a_id: playerA.player_id,
           player_b_id: playerB.player_id,
+          season_a_id: seasonA,
+          season_b_id: seasonB,
+          possession_mode: possessionMode,
           n: BULK_SIM_COUNT,
         }
       )
@@ -181,7 +241,13 @@ function PlayerSelectionController() {
       if (axios.isAxiosError(error) && error.response?.status === 404) {
         try {
           setBulkResult(
-            await runBulkClientSide(playerA.player_id, playerB.player_id)
+            await runBulkClientSide(
+              playerA.player_id,
+              playerB.player_id,
+              seasonA,
+              seasonB,
+              possessionMode
+            )
           )
         } catch (fallbackError) {
           setSimulationError(getSimulationError(fallbackError))
@@ -209,38 +275,45 @@ function PlayerSelectionController() {
             Pick two players from any era and simulate a one-on-one game to 21.
           </p>
         </div>
-        <div className="flex flex-col items-stretch gap-2 sm:flex-row md:items-end">
-          <Button
-            disabled={!canRunSimulation || busy}
-            className="sm:w-auto"
-            onClick={runSimulation}
-          >
-            {simulationLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Swords className="h-4 w-4" />
-            )}
-            {simulationResult ? "Re-run game" : "Run game"}
-          </Button>
-          <Button
-            variant="secondary"
-            disabled={!canRunSimulation || busy}
-            className="sm:w-auto"
-            onClick={runBulkSimulation}
-          >
-            {bulkLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Percent className="h-4 w-4" />
-            )}
-            {bulkLoading ? "Running 1,000…" : "Run 1,000 sims"}
-          </Button>
+        <div className="flex flex-col items-stretch gap-3 sm:items-end">
+          <PossessionModeToggle
+            value={possessionMode}
+            onChange={setPossessionMode}
+            disabled={busy}
+          />
+          <div className="flex flex-col items-stretch gap-2 sm:flex-row md:items-end">
+            <Button
+              disabled={!canRunSimulation || busy}
+              className="sm:w-auto"
+              onClick={runSimulation}
+            >
+              {simulationLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Swords className="h-4 w-4" />
+              )}
+              {simulationResult ? "Re-run game" : "Run game"}
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={!canRunSimulation || busy}
+              className="sm:w-auto"
+              onClick={runBulkSimulation}
+            >
+              {bulkLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Percent className="h-4 w-4" />
+              )}
+              {bulkLoading ? "Running 1,000…" : "Run 1,000 sims"}
+            </Button>
+          </div>
         </div>
       </div>
 
       {!canRunSimulation && (
         <p className="mb-4 text-sm text-muted-foreground">
-          Select both players to enable the simulation.
+          Select both players and a season for each to enable the simulation.
         </p>
       )}
 
@@ -248,8 +321,10 @@ function PlayerSelectionController() {
         <PlayerSlot
           label="Player A"
           selectedPlayer={playerA}
+          selectedSeason={seasonA}
           onSelect={selectPlayerA}
           onClear={() => selectPlayerA(null)}
+          onSeasonSelect={selectSeasonA}
           winPct={bulkResult ? bulkResult.player_a_win_pct : null}
           confidenceTier={
             playerA
@@ -266,8 +341,10 @@ function PlayerSelectionController() {
         <PlayerSlot
           label="Player B"
           selectedPlayer={playerB}
+          selectedSeason={seasonB}
           onSelect={selectPlayerB}
           onClear={() => selectPlayerB(null)}
+          onSeasonSelect={selectSeasonB}
           winPct={bulkResult ? bulkResult.player_b_win_pct : null}
           confidenceTier={
             playerB
@@ -313,29 +390,69 @@ function PlayerSelectionController() {
 function PlayerSlot({
   label,
   selectedPlayer,
+  selectedSeason,
   onSelect,
   onClear,
+  onSeasonSelect,
   winPct,
   confidenceTier,
 }: PlayerSlotProps) {
   const [query, setQuery] = useState("")
   const { player, loading, error, searchPlayer, clearPlayer } = usePlayerSearch()
+  const {
+    seasons,
+    loading: seasonsLoading,
+    error: seasonsError,
+    loadSeasons,
+    clearSeasons,
+  } = usePlayerSeasons()
+  const {
+    stats: seasonStats,
+    loading: seasonStatsLoading,
+    error: seasonStatsError,
+    loadSeasonStats,
+    clearSeasonStats,
+  } = usePlayerSeasonStats()
+
+  const profile = selectedPlayer ?? player
+
+  // Confirm a freshly searched player: reset any prior season selection and
+  // load the seasons available for the new player.
+  function confirmPlayer(result: PlayerProfile) {
+    onSelect(result)
+    onSeasonSelect(null)
+    clearSeasonStats()
+    loadSeasons(result.player_id)
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const result = await searchPlayer(query)
     if (result) {
-      onSelect(result)
+      confirmPlayer(result)
     }
   }
 
   function handleClear() {
     clearPlayer()
+    clearSeasons()
+    clearSeasonStats()
     setQuery("")
     onClear()
+    onSeasonSelect(null)
   }
 
-  const profile = selectedPlayer ?? player
+  function handleSeasonChange(seasonId: string) {
+    if (!seasonId) {
+      onSeasonSelect(null)
+      clearSeasonStats()
+      return
+    }
+    onSeasonSelect(seasonId)
+    if (profile) {
+      loadSeasonStats(profile.player_id, seasonId)
+    }
+  }
 
   return (
     <Card className="min-h-[32rem] rounded-lg">
@@ -405,6 +522,21 @@ function PlayerSlot({
               </Button>
             </div>
 
+            <SeasonSelector
+              label={label}
+              seasons={seasons}
+              value={selectedSeason}
+              loading={seasonsLoading}
+              onChange={handleSeasonChange}
+            />
+
+            {seasonsError && (
+              <Alert variant="destructive">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertDescription>{seasonsError}</AlertDescription>
+              </Alert>
+            )}
+
             <Separator />
 
             <div className="grid grid-cols-2 gap-3">
@@ -415,16 +547,17 @@ function PlayerSlot({
                 value={formatWingspan(profile.wingspan)}
               />
               <Attribute
-                label="Career"
-                value={formatCareer(profile.from_year, profile.to_year)}
+                label="Season"
+                value={selectedSeason ?? "Not selected"}
               />
             </div>
 
-            <div className="grid grid-cols-3 gap-3 rounded-md border bg-muted/30 p-3">
-              <Stat label="PTS" value={profile.headline_stats.points} />
-              <Stat label="REB" value={profile.headline_stats.rebounds} />
-              <Stat label="AST" value={profile.headline_stats.assists} />
-            </div>
+            <SeasonStatsPanel
+              selectedSeason={selectedSeason}
+              stats={seasonStats}
+              loading={seasonStatsLoading}
+              error={seasonStatsError}
+            />
 
             {profile.data_warnings.length > 0 && (
               <WarningAlert warnings={profile.data_warnings} />
@@ -438,6 +571,114 @@ function PlayerSlot({
         )}
       </CardContent>
     </Card>
+  )
+}
+
+function SeasonSelector({
+  label,
+  seasons,
+  value,
+  loading,
+  onChange,
+}: {
+  label: SlotLabel
+  seasons: { season_id: string; season_label: string }[]
+  value: string | null
+  loading: boolean
+  onChange: (seasonId: string) => void
+}) {
+  return (
+    <div className="space-y-1.5">
+      <label
+        className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground"
+        htmlFor={`${label}-season`}
+      >
+        <CalendarDays className="h-3.5 w-3.5" />
+        Season
+      </label>
+      <div className="relative">
+        <select
+          id={`${label}-season`}
+          aria-label={`Select season for ${label}`}
+          value={value ?? ""}
+          disabled={loading || seasons.length === 0}
+          onChange={(event) => onChange(event.target.value)}
+          className={cn(
+            "flex h-9 w-full appearance-none rounded-md border border-input bg-background px-3 py-1 pr-8 text-sm shadow-sm transition-colors",
+            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            "disabled:cursor-not-allowed disabled:opacity-50"
+          )}
+        >
+          <option value="" disabled>
+            {loading ? "Loading seasons…" : "Select a season"}
+          </option>
+          {seasons.map((season) => (
+            <option key={season.season_id} value={season.season_id}>
+              {season.season_label}
+            </option>
+          ))}
+        </select>
+        {loading ? (
+          <Loader2 className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+        ) : (
+          <CalendarDays className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        )}
+      </div>
+    </div>
+  )
+}
+
+function SeasonStatsPanel({
+  selectedSeason,
+  stats,
+  loading,
+  error,
+}: {
+  selectedSeason: string | null
+  stats: PlayerSeasonStats | null
+  loading: boolean
+  error: string | null
+}) {
+  if (!selectedSeason) {
+    return (
+      <div className="flex items-center justify-center rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+        Select a season to view that year's stats.
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <Alert variant="destructive">
+        <AlertTriangle className="h-4 w-4" />
+        <AlertDescription>{error}</AlertDescription>
+      </Alert>
+    )
+  }
+
+  if (loading || !stats) {
+    return (
+      <div className="flex items-center justify-center gap-2 rounded-md border bg-muted/30 p-4 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Loading {selectedSeason} stats…
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {stats.season_label} per game
+      </div>
+      <div className="grid grid-cols-3 gap-3 rounded-md border bg-muted/30 p-3">
+        <Stat label="PTS" value={stats.points_per_game} />
+        <Stat label="REB" value={stats.rebound_per_game} />
+        <Stat label="AST" value={stats.assist_per_game} />
+        <Stat label="FGA" value={stats.fga_per_game} />
+        <Stat label="BLK" value={stats.block_per_game} />
+        <Stat label="STL" value={stats.steal_per_game} />
+      </div>
+    </div>
   )
 }
 
@@ -512,6 +753,54 @@ function ConfidenceBadge({ tier }: { tier: ConfidenceTier }) {
         {CONFIDENCE_TOOLTIPS[tier]}
       </TooltipContent>
     </Tooltip>
+  )
+}
+
+function PossessionModeToggle({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: PossessionMode
+  onChange: (mode: PossessionMode) => void
+  disabled?: boolean
+}) {
+  return (
+    <div className="flex flex-col gap-1.5 sm:items-end">
+      <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        Possession mode
+      </span>
+      <div
+        role="radiogroup"
+        aria-label="Possession mode"
+        className="inline-flex rounded-md border bg-muted/40 p-0.5"
+      >
+        {POSSESSION_MODES.map((mode) => {
+          const Icon = mode.icon
+          const active = value === mode.value
+          return (
+            <button
+              key={mode.value}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              disabled={disabled}
+              onClick={() => onChange(mode.value)}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-[5px] px-3 py-1.5 text-sm font-medium transition-colors",
+                "disabled:cursor-not-allowed disabled:opacity-50",
+                active
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {mode.label}
+            </button>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
@@ -911,16 +1200,63 @@ function ZoneChip({
 }
 
 function PlayByPlayView({ playByPlay }: { playByPlay: PlayByPlay[] }) {
+  // Reveal possessions one at a time. A new result (new array reference) resets
+  // the reveal so each simulation animates from the beginning (AC-ISO-003.4).
+  const [visibleCount, setVisibleCount] = useState(0)
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  function stopInterval() {
+    if (intervalRef.current !== null) {
+      clearInterval(intervalRef.current)
+      intervalRef.current = null
+    }
+  }
+
+  useEffect(() => {
+    setVisibleCount(0)
+    stopInterval()
+
+    if (playByPlay.length === 0) {
+      return
+    }
+
+    intervalRef.current = setInterval(() => {
+      setVisibleCount((count) => {
+        const next = count + 1
+        if (next >= playByPlay.length) {
+          stopInterval()
+        }
+        return Math.min(next, playByPlay.length)
+      })
+    }, PLAY_BY_PLAY_TICK_MS)
+
+    return stopInterval
+  }, [playByPlay])
+
+  function skipAnimation() {
+    stopInterval()
+    setVisibleCount(playByPlay.length)
+  }
+
+  const animating = visibleCount < playByPlay.length
+  const visiblePlays = playByPlay.slice(0, visibleCount)
+
   return (
     <Card className="flex flex-col rounded-lg">
-      <CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
         <CardTitle className="text-sm font-medium text-muted-foreground">
           Play-by-play
         </CardTitle>
+        {animating && (
+          <Button variant="ghost" size="sm" onClick={skipAnimation}>
+            <FastForward className="h-4 w-4" />
+            Skip animation
+          </Button>
+        )}
       </CardHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col">
         <div className="min-h-[20rem] flex-1 space-y-2 overflow-y-auto pr-1 xl:min-h-0">
-          {playByPlay.map((play) => (
+          {visiblePlays.map((play) => (
             <div
               key={play.possession}
               className="grid grid-cols-[2.5rem_1fr_auto] items-center gap-3 rounded-md border p-3 text-sm"
@@ -961,7 +1297,7 @@ function OutcomeBadge({ play }: { play: PlayByPlay }) {
   if (play.foul) {
     return (
       <Pill tone="warning" dot>
-        Foul +1
+        Foul
       </Pill>
     )
   }
@@ -984,7 +1320,7 @@ function playDetail(play: PlayByPlay): string {
     return "Lost possession"
   }
   if (play.foul) {
-    return "Drew a shooting foul"
+    return "Drew a foul — possession retained"
   }
   const type = formatShotType(play.shot_type)
   return type.charAt(0).toUpperCase() + type.slice(1)
@@ -1005,16 +1341,6 @@ function formatWeight(weight: string | null) {
 
 function formatWingspan(wingspan: number | null) {
   return typeof wingspan === "number" ? `${wingspan.toFixed(1)} in` : "N/A"
-}
-
-function formatCareer(
-  fromYear: string | number | null,
-  toYear: string | number | null
-) {
-  if (!fromYear && !toYear) {
-    return "N/A"
-  }
-  return `${fromYear ?? "?"}-${toYear ?? "?"}`
 }
 
 function formatPct(value: number) {
@@ -1041,7 +1367,10 @@ export default SimulatorView
 
 async function runBulkClientSide(
   playerAId: number,
-  playerBId: number
+  playerBId: number,
+  seasonAId: string,
+  seasonBId: string,
+  possessionMode: PossessionMode
 ): Promise<BulkSimulationResult> {
   let playerAWins = 0
   let playerBWins = 0
@@ -1050,7 +1379,14 @@ async function runBulkClientSide(
   for (let seed = 0; seed < BULK_SIM_COUNT; seed++) {
     const response = await axios.post<SimulationResult>(
       `${API_BASE_URL}/simulate`,
-      { player_a_id: playerAId, player_b_id: playerBId, seed }
+      {
+        player_a_id: playerAId,
+        player_b_id: playerBId,
+        season_a_id: seasonAId,
+        season_b_id: seasonBId,
+        possession_mode: possessionMode,
+        seed,
+      }
     )
     const { a, b } = response.data.summary.final_score
     if (a > b) {
