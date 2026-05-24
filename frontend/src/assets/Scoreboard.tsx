@@ -1,15 +1,30 @@
+import { Loader2 } from "lucide-react"
+
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { useScoreboard } from "@/hooks/useScoreboard"
 
-const Home = () => {
-  const { games } = useScoreboard()
+const Scoreboard = () => {
+  const { games, loading, error } = useScoreboard()
 
   return (
     <div className="min-h-screen px-4 py-8 max-w-screen-lg mx-auto">
       <h1 className="text-4xl font-extrabold tracking-tight mb-8">Scoreboard</h1>
 
-      {games.length === 0 && (
+      {loading && (
+        <div className="flex items-center gap-2 text-muted-foreground text-sm">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading games…
+        </div>
+      )}
+
+      {error && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </div>
+      )}
+
+      {!loading && !error && games.length === 0 && (
         <p className="text-muted-foreground text-sm">No games available.</p>
       )}
 
@@ -80,4 +95,4 @@ const Home = () => {
   )
 }
 
-export default Home
+export default Scoreboard
