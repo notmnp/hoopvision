@@ -352,6 +352,17 @@ class TendencyProfileBuilder:
                 matchup_stats.turnovers / possessions, 0.0, 1.0
             ),
             "block_rate": cls._clamp(matchup_stats.blocks / fga, 0.0, 1.0),
+            # steal_rate retains the career-average proxy (career steals/game
+            # normalized by ~12 possessions). Spike (WO-24): LeagueSeasonMatchups
+            # exposes no steals column at all — its defensive fields are only
+            # MATCHUP_BLK and HELP_BLK (blocks) plus MATCHUP_TOV (the offensive
+            # player's turnovers); there is no MATCHUP_STL or equivalent.
+            # Moreover, these rows are queried with the player as the OFFENSIVE
+            # player, so any steal figure would describe the defender stripping
+            # this player, not this player's own defensive steals. The player's
+            # own career steal rate is therefore the more faithful source for a
+            # defensive steal_rate, and the proxy is retained as a permanent
+            # constraint.
             "steal_rate": cls._clamp(features["steal_per_game"] / 12.0, 0.0, 1.0),
         }
 
