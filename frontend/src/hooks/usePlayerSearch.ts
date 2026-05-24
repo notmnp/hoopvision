@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useCallback, useState } from "react"
 import axios from "axios"
 import { API_BASE_URL } from "@/lib/config"
 
@@ -70,6 +70,45 @@ export function usePlayerSearch() {
     searchPlayer,
     clearPlayer,
   }
+}
+
+export interface PlayerSuggestion {
+  id: number
+  full_name: string
+}
+
+export function usePlayerSuggestions() {
+  const [suggestions, setSuggestions] = useState<PlayerSuggestion[]>([])
+  const [loading, setLoading] = useState(false)
+
+  // Memoized so consumers can safely list these in effect dependency arrays
+  // (e.g. a debounced search effect) without re-running every render.
+  const searchSuggestions = useCallback(async (query: string) => {
+    const trimmedName = query.trim()
+    if (!trimmedName) {
+      setSuggestions([])
+      return
+    }
+
+    setLoading(true)
+    try {
+      const response = await axios.get<PlayerSuggestion[]>(
+        `${API_BASE_URL}/players/search`,
+        { params: { q: trimmedName } }
+      )
+      setSuggestions(response.data)
+    } catch {
+      setSuggestions([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  const clearSuggestions = useCallback(() => {
+    setSuggestions([])
+  }, [])
+
+  return { suggestions, loading, searchSuggestions, clearSuggestions }
 }
 
 function decodePlayerSearchInput(name: string) {

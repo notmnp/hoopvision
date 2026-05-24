@@ -34,6 +34,11 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+} from "@/components/ui/popover"
 import { Progress } from "@/components/ui/progress"
 import { Separator } from "@/components/ui/separator"
 import {
@@ -43,7 +48,9 @@ import {
 } from "@/components/ui/tooltip"
 import {
   PlayerProfile,
+  PlayerSuggestion,
   usePlayerSearch,
+  usePlayerSuggestions,
 } from "@/hooks/usePlayerSearch"
 import {
   PlayerSeasonStats,
@@ -55,13 +62,27 @@ type SlotLabel = "Player A" | "Player B"
 
 type PossessionMode = "make_it_take_it" | "alternating"
 
+// "Winners" = make-it-take-it (the scorer keeps possession); "Losers" = the
+// ball always changes hands, so the player who was just scored on gets it next.
+// The backend contract still uses make_it_take_it / alternating.
 const POSSESSION_MODES: {
   value: PossessionMode
   label: string
+  hint: string
   icon: typeof Repeat
 }[] = [
-  { value: "make_it_take_it", label: "Make it, take it", icon: Repeat },
-  { value: "alternating", label: "Alternating", icon: Shuffle },
+  {
+    value: "make_it_take_it",
+    label: "Winners",
+    hint: "Scorer keeps the ball",
+    icon: Repeat,
+  },
+  {
+    value: "alternating",
+    label: "Losers",
+    hint: "Ball changes hands every possession",
+    icon: Shuffle,
+  },
 ]
 
 // One revealed possession per tick while the play-by-play log animates in.
@@ -313,7 +334,7 @@ function PlayerSelectionController() {
 
       {!canRunSimulation && (
         <p className="mb-4 text-sm text-muted-foreground">
-          Select both players and a season for each to enable the simulation.
+          {runRequirementHint(playerA, playerB, seasonA, seasonB)}
         </p>
       )}
 
@@ -398,7 +419,14 @@ function PlayerSlot({
   confidenceTier,
 }: PlayerSlotProps) {
   const [query, setQuery] = useState("")
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false)
   const { player, loading, error, searchPlayer, clearPlayer } = usePlayerSearch()
+  const {
+    suggestions,
+    loading: suggestionsLoading,
+    searchSuggestions,
+    clearSuggestions,
+  } = usePlayerSuggestions()
   const {
     seasons,
     loading: seasonsLoading,
@@ -416,9 +444,23 @@ function PlayerSlot({
 
   const profile = selectedPlayer ?? player
 
-  // Confirm a freshly searched player: reset any prior season selection and
-  // load the seasons available for the new player.
+  // Debounced type-ahead: fetch suggestions 300ms after the last keystroke.
+  // The Popover handles dismiss-on-outside-click and Escape via onOpenChange.
+  useEffect(() => {
+    const trimmed = query.trim()
+    if (!trimmed) {
+      clearSuggestions()
+      return
+    }
+    const handle = setTimeout(() => searchSuggestions(trimmed), 300)
+    return () => clearTimeout(handle)
+  }, [query, searchSuggestions, clearSuggestions])
+
+  // Confirm a freshly searched player: reset any prior season selection, close
+  // the suggestions dropdown, and load the seasons available for the player.
   function confirmPlayer(result: PlayerProfile) {
+    setSuggestionsOpen(false)
+    clearSuggestions()
     onSelect(result)
     onSeasonSelect(null)
     clearSeasonStats()
@@ -427,7 +469,18 @@ function PlayerSlot({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    setSuggestionsOpen(false)
     const result = await searchPlayer(query)
+    if (result) {
+      confirmPlayer(result)
+    }
+  }
+
+  async function handleSelectSuggestion(suggestion: PlayerSuggestion) {
+    setQuery(suggestion.full_name)
+    setSuggestionsOpen(false)
+    clearSuggestions()
+    const result = await searchPlayer(suggestion.full_name)
     if (result) {
       confirmPlayer(result)
     }
@@ -437,6 +490,8 @@ function PlayerSlot({
     clearPlayer()
     clearSeasons()
     clearSeasonStats()
+    clearSuggestions()
+    setSuggestionsOpen(false)
     setQuery("")
     onClear()
     onSeasonSelect(null)
@@ -463,26 +518,75 @@ function PlayerSlot({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-5">
-        <form onSubmit={handleSubmit} className="flex gap-2">
-          <Input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search a player…"
-            aria-label={`Search ${label}`}
-          />
-          <Button
-            type="submit"
-            size="icon"
-            aria-label={`Search ${label}`}
-            disabled={loading || !query.trim()}
+        <Popover open={suggestionsOpen} onOpenChange={setSuggestionsOpen}>
+          <PopoverAnchor asChild>
+            <form onSubmit={handleSubmit} className="flex gap-2">
+              <Input
+                value={query}
+                onChange={(event) => {
+                  setQuery(event.target.value)
+                  setSuggestionsOpen(event.target.value.trim() !== "")
+                }}
+                onFocus={() => {
+                  if (query.trim() !== "") {
+                    setSuggestionsOpen(true)
+                  }
+                }}
+                placeholder="Search a player…"
+                aria-label={`Search ${label}`}
+                autoComplete="off"
+              />
+              <Button
+                type="submit"
+                size="icon"
+                aria-label={`Search ${label}`}
+                disabled={loading || !query.trim()}
+              >
+                {loading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Search className="h-4 w-4" />
+                )}
+              </Button>
+            </form>
+          </PopoverAnchor>
+          <PopoverContent
+            align="start"
+            sideOffset={6}
+            // Keep focus in the input so the user can keep typing while the
+            // suggestion list is open.
+            onOpenAutoFocus={(event) => event.preventDefault()}
+            className="max-h-64 overflow-y-auto p-1"
+            style={{ width: "var(--radix-popover-trigger-width)" }}
           >
-            {loading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+            {suggestions.length === 0 ? (
+              <div className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground">
+                {suggestionsLoading ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Searching…
+                  </>
+                ) : (
+                  "No players found."
+                )}
+              </div>
             ) : (
-              <Search className="h-4 w-4" />
+              <ul>
+                {suggestions.map((suggestion) => (
+                  <li key={suggestion.id}>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectSuggestion(suggestion)}
+                      className="flex w-full items-center rounded-sm px-3 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+                    >
+                      {suggestion.full_name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
             )}
-          </Button>
-        </form>
+          </PopoverContent>
+        </Popover>
 
         {error && (
           <Alert variant="destructive">
@@ -784,6 +888,8 @@ function PossessionModeToggle({
               type="button"
               role="radio"
               aria-checked={active}
+              aria-label={`${mode.label} — ${mode.hint}`}
+              title={mode.hint}
               disabled={disabled}
               onClick={() => onChange(mode.value)}
               className={cn(
@@ -1341,6 +1447,31 @@ function formatWeight(weight: string | null) {
 
 function formatWingspan(wingspan: number | null) {
   return typeof wingspan === "number" ? `${wingspan.toFixed(1)} in` : "N/A"
+}
+
+// Spells out exactly what is still missing so a disabled "Run game" button is
+// never a mystery: a player can be picked but still need a season selected.
+function runRequirementHint(
+  playerA: PlayerProfile | null,
+  playerB: PlayerProfile | null,
+  seasonA: string | null,
+  seasonB: string | null
+): string {
+  const missing: string[] = []
+  if (!playerA) missing.push("select Player A")
+  else if (!seasonA) missing.push("choose Player A's season")
+  if (!playerB) missing.push("select Player B")
+  else if (!seasonB) missing.push("choose Player B's season")
+
+  if (missing.length === 0) {
+    return "Ready to simulate."
+  }
+  return `To run a simulation, ${joinWithAnd(missing)}.`
+}
+
+function joinWithAnd(items: string[]): string {
+  if (items.length <= 1) return items.join("")
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`
 }
 
 function formatPct(value: number) {

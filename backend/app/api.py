@@ -98,6 +98,11 @@ class BulkSimulationResult(BaseModel):
     player_b_win_pct: float
 
 
+class PlayerSearchSuggestion(BaseModel):
+    id: int
+    full_name: str
+
+
 class PlayerSeasonOption(BaseModel):
     season_id: str
     season_label: str
@@ -395,6 +400,23 @@ def _get_player_profile_by_id(player_id: int) -> dict[str, Any]:
 @app.get("/", tags=["root"])
 async def read_root() -> dict:
     return {"message": "Welcome to your NBA API backend."}
+
+
+@app.get(
+    "/players/search",
+    tags=["nba"],
+    response_model=list[PlayerSearchSuggestion],
+)
+async def search_players(q: str = ""):
+    # Backs the type-ahead dropdown. Queries the in-process static player index
+    # (no NBA Stats call), so no caching is required. Exact name matches rank
+    # ahead of partial matches via _find_player_matches; an empty query or no
+    # match yields an empty list rather than a 404.
+    matches = _find_player_matches(q)
+    return [
+        {"id": player["id"], "full_name": player["full_name"]}
+        for player in matches[:10]
+    ]
 
 
 @app.get("/player/{name}", tags=["nba"])
