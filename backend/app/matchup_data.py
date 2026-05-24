@@ -73,11 +73,11 @@ class MatchupDataService:
         height_bucket: str,
     ) -> MatchupConditionedStats:
         normalized_bucket = self._normalize_height_bucket(height_bucket)
-        matchup_rows = self._fetch_tracking_matchups(player_id)
+        matchup_rows, active_seasons = self._fetch_tracking_matchups(player_id)
         if not matchup_rows:
             return self._empty_stats(normalized_bucket)
 
-        defender_buckets = self._defender_height_index()
+        defender_buckets = self._defender_height_index(active_seasons)
         conditioned_rows = [
             row
             for row in matchup_rows
@@ -113,7 +113,7 @@ class MatchupDataService:
                 for row in conditioned_rows
             )
         )
-        zone_data = self._fetch_zone_data(player_id)
+        zone_data = self._fetch_zone_data(player_id, active_seasons)
         data_warnings = [ZONE_DATA_UNCONDITIONED_WARNING] if zone_data else []
         return MatchupConditionedStats(
             sufficient_sample=possession_count >= SUFFICIENT_SAMPLE_POSSESSIONS,
@@ -129,8 +129,11 @@ class MatchupDataService:
             data_warnings=data_warnings,
         )
 
-    def _fetch_tracking_matchups(self, player_id: int) -> list[dict[str, Any]]:
+    def _fetch_tracking_matchups(
+        self, player_id: int
+    ) -> tuple[list[dict[str, Any]], list[int]]:
         rows: list[dict[str, Any]] = []
+        active_seasons: list[int] = []
         for season in self._tracking_seasons():
             data = fetch_stats_data(
                 f"leagueseasonmatchups:{season}:{player_id}",
@@ -143,19 +146,25 @@ class MatchupDataService:
                     timeout=NBA_STATS_TIMEOUT_SECONDS,
                 ),
             )
-            rows.extend(data.get("SeasonMatchups", []))
-        return rows
+            season_rows = data.get("SeasonMatchups", [])
+            if season_rows:
+                active_seasons.append(season)
+                rows.extend(season_rows)
+        return rows, active_seasons
 
     def _fetch_zone_data(
         self,
         player_id: int,
+        seasons: list[int],
     ) -> list[ZoneShotData]:
         # ShotChartDetail has no defender filter, so the result is identical
         # regardless of the requested height bucket. The cache key omits the
         # bucket so the same player-season is fetched and cached once, not four
         # times. The undifferentiated nature is surfaced via data_warnings.
+        # Only the player's active matchup seasons are queried — seasons before
+        # their debut would return empty shot charts and waste throttled calls.
         rows: list[dict[str, Any]] = []
-        for season in self._tracking_seasons():
+        for season in seasons:
             data = fetch_stats_data(
                 f"shotchartdetail:{season}:{player_id}",
                 lambda season=season: shotchartdetail.ShotChartDetail(
@@ -171,17 +180,19 @@ class MatchupDataService:
             rows.extend(data.get("Shot_Chart_Detail", []))
         return self._aggregate_zone_data(rows)
 
-    def _defender_height_index(self) -> dict[int, str]:
-        """Map player_id -> height bucket for every tracking-era player.
+    def _defender_height_index(self, seasons: list[int]) -> dict[int, str]:
+        """Map player_id -> height bucket across the given seasons.
 
         Defender heights are resolved from one bulk LeagueDashPlayerBioStats
         call per season (cached) rather than a per-defender CommonPlayerInfo
         call. A single star can face hundreds of distinct defenders per season,
         so the per-defender approach issued thousands of throttled requests and
-        made a simulation effectively never finish.
+        made a simulation effectively never finish. Only the player's active
+        matchup seasons are queried, which fully covers every defender they
+        faced (a defender in a season's matchup rows played that season).
         """
         index: dict[int, str] = {}
-        for season in self._tracking_seasons():
+        for season in seasons:
             data = fetch_stats_data(
                 f"leaguedashplayerbiostats:{season}",
                 lambda season=season: leaguedashplayerbiostats.LeagueDashPlayerBioStats(
