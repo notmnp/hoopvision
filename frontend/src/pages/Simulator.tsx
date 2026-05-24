@@ -26,6 +26,15 @@ import {
 
 type SlotLabel = "Player A" | "Player B"
 
+type ConfidenceTier = "HIGH" | "MEDIUM" | "LOW"
+
+const CONFIDENCE_TOOLTIPS: Record<ConfidenceTier, string> = {
+  HIGH: "HIGH confidence: sufficient matchup tracking data available for this player.",
+  MEDIUM:
+    "MEDIUM confidence: post-tracking era player with limited observed data.",
+  LOW: "LOW confidence: pre-tracking era or statistical outlier — model-generalized profile.",
+}
+
 interface PlayByPlay {
   possession: number
   offensive_player: string
@@ -47,6 +56,7 @@ interface PlayerSimStats {
   }
   turnovers: number
   fouls_drawn: number
+  confidence_tier?: ConfidenceTier
 }
 
 interface MatchSummary {
@@ -81,6 +91,7 @@ interface PlayerSlotProps {
   onSelect: (player: PlayerProfile) => void
   onClear: () => void
   winPct?: number | null
+  confidenceTier?: ConfidenceTier | null
 }
 
 function PlayerSelectionController() {
@@ -213,6 +224,12 @@ function PlayerSelectionController() {
           onSelect={selectPlayerA}
           onClear={() => selectPlayerA(null)}
           winPct={bulkResult ? bulkResult.player_a_win_pct : null}
+          confidenceTier={
+            playerA
+              ? simulationResult?.summary.player_stats[playerA.name]
+                  ?.confidence_tier ?? null
+              : null
+          }
         />
         <div className="hidden h-full items-center justify-center lg:flex">
           <div className="flex h-12 w-12 items-center justify-center rounded-full border bg-muted text-sm font-semibold">
@@ -225,6 +242,12 @@ function PlayerSelectionController() {
           onSelect={selectPlayerB}
           onClear={() => selectPlayerB(null)}
           winPct={bulkResult ? bulkResult.player_b_win_pct : null}
+          confidenceTier={
+            playerB
+              ? simulationResult?.summary.player_stats[playerB.name]
+                  ?.confidence_tier ?? null
+              : null
+          }
         />
       </div>
 
@@ -256,6 +279,7 @@ function PlayerSlot({
   onSelect,
   onClear,
   winPct,
+  confidenceTier,
 }: PlayerSlotProps) {
   const [query, setQuery] = useState("")
   const { player, loading, error, searchPlayer, clearPlayer } = usePlayerSearch()
@@ -320,6 +344,7 @@ function PlayerSlot({
                       Wins {Math.round(winPct)}%
                     </Badge>
                   )}
+                  {confidenceTier && <ConfidenceBadge tier={confidenceTier} />}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {profile.position && <Badge>{profile.position}</Badge>}
@@ -368,6 +393,21 @@ function PlayerSlot({
         )}
       </CardContent>
     </Card>
+  )
+}
+
+function ConfidenceBadge({ tier }: { tier: ConfidenceTier }) {
+  const variant = tier === "LOW" ? "destructive" : "default"
+  const className =
+    tier === "HIGH"
+      ? "border-transparent bg-emerald-600 text-white"
+      : tier === "MEDIUM"
+        ? "border-transparent bg-amber-500 text-white"
+        : ""
+  return (
+    <Badge variant={variant} className={className} title={CONFIDENCE_TOOLTIPS[tier]}>
+      {tier} confidence
+    </Badge>
   )
 }
 
