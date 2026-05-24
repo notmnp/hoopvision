@@ -456,15 +456,21 @@ function PlayerSlot({
     return () => clearTimeout(handle)
   }, [query, searchSuggestions, clearSuggestions])
 
-  // Confirm a freshly searched player: reset any prior season selection, close
-  // the suggestions dropdown, and load the seasons available for the player.
-  function confirmPlayer(result: PlayerProfile) {
+  // Confirm a freshly searched player: close the suggestions dropdown, load the
+  // player's seasons, then default the selection to the most recent one (the
+  // list is returned newest-first) so the matchup is runnable immediately. The
+  // user can still pick a different season from the dropdown.
+  async function confirmPlayer(result: PlayerProfile) {
     setSuggestionsOpen(false)
     clearSuggestions()
     onSelect(result)
-    onSeasonSelect(null)
     clearSeasonStats()
-    loadSeasons(result.player_id)
+    const loadedSeasons = await loadSeasons(result.player_id)
+    const mostRecentSeason = loadedSeasons?.[0]?.season_id ?? null
+    onSeasonSelect(mostRecentSeason)
+    if (mostRecentSeason) {
+      loadSeasonStats(result.player_id, mostRecentSeason)
+    }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -472,7 +478,7 @@ function PlayerSlot({
     setSuggestionsOpen(false)
     const result = await searchPlayer(query)
     if (result) {
-      confirmPlayer(result)
+      await confirmPlayer(result)
     }
   }
 
@@ -482,7 +488,7 @@ function PlayerSlot({
     clearSuggestions()
     const result = await searchPlayer(suggestion.full_name)
     if (result) {
-      confirmPlayer(result)
+      await confirmPlayer(result)
     }
   }
 
