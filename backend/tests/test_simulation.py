@@ -8,7 +8,7 @@ from backend.app.simulation import SimulationEngine
 from backend.app.tendency_profile import TendencyProfile
 
 
-def make_profile(player_id, three_frequency=0.2):
+def make_profile(player_id, three_frequency=0.2, confidence_tier="MEDIUM"):
     return TendencyProfile(
         player_id=player_id,
         model_version="test",
@@ -26,12 +26,14 @@ def make_profile(player_id, three_frequency=0.2):
         turnover_rate=0.08,
         era_adjustment={"era_key": "modern_spacing"},
         data_warnings=[],
+        confidence_tier=confidence_tier,
     )
 
 
 class StubProfileBuilder:
-    def __init__(self):
+    def __init__(self, confidence_tiers=None):
         self.calls = []
+        self.confidence_tiers = confidence_tiers or {}
 
     def build_profile(
         self,
@@ -48,7 +50,10 @@ class StubProfileBuilder:
                 "career_end_year": career_end_year,
             }
         )
-        return make_profile(player_id)
+        return make_profile(
+            player_id,
+            confidence_tier=self.confidence_tiers.get(player_id, "MEDIUM"),
+        )
 
 
 class SimulationEngineTest(unittest.TestCase):
@@ -109,6 +114,18 @@ class SimulationEngineTest(unittest.TestCase):
 
         # Profiles are built once per matchup, not once per simulation.
         self.assertEqual(len(self.profile_builder.calls), 2)
+
+    def test_player_stats_expose_confidence_tier_per_player(self):
+        profile_builder = StubProfileBuilder(
+            confidence_tiers={1: "HIGH", 2: "LOW"}
+        )
+        engine = SimulationEngine(self.players.get, profile_builder)
+
+        result = engine.simulate(1, 2, seed=5)
+
+        player_stats = result["summary"]["player_stats"]
+        self.assertEqual(player_stats["Player A"]["confidence_tier"], "HIGH")
+        self.assertEqual(player_stats["Player B"]["confidence_tier"], "LOW")
 
     def test_collects_data_warnings(self):
         self.players[1]["data_warnings"] = ["substituted wingspan"]

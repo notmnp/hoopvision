@@ -197,6 +197,10 @@ class SimulationEngine:
         winner = (
             matchup.player_a["name"] if winner_key == "a" else matchup.player_b["name"]
         )
+        confidence_by_name = {
+            matchup.player_a["name"]: matchup.profile_a.confidence_tier,
+            matchup.player_b["name"]: matchup.profile_b.confidence_tier,
+        }
 
         return {
             "play_by_play": [play.to_dict() for play in play_by_play],
@@ -204,7 +208,10 @@ class SimulationEngine:
                 "winner": winner,
                 "final_score": scores,
                 "player_stats": {
-                    player_name: player_stats.to_dict()
+                    player_name: {
+                        **player_stats.to_dict(),
+                        "confidence_tier": confidence_by_name.get(player_name),
+                    }
                     for player_name, player_stats in stats.items()
                 },
                 "data_warnings": matchup.data_warnings,
