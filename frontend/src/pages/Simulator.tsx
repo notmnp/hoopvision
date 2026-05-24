@@ -4,6 +4,7 @@ import { API_BASE_URL } from "@/lib/config"
 import {
   AlertTriangle,
   Loader2,
+  Percent,
   RotateCcw,
   Search,
   Swords,
@@ -63,11 +64,23 @@ interface SimulationResult {
   summary: MatchSummary
 }
 
+interface BulkSimulationResult {
+  player_a_wins: number
+  player_b_wins: number
+  ties: number
+  total_simulations: number
+  player_a_win_pct: number
+  player_b_win_pct: number
+}
+
+const BULK_SIM_COUNT = 1000
+
 interface PlayerSlotProps {
   label: SlotLabel
   selectedPlayer: PlayerProfile | null
   onSelect: (player: PlayerProfile) => void
   onClear: () => void
+  winPct?: number | null
 }
 
 function PlayerSelectionController() {
@@ -77,7 +90,20 @@ function PlayerSelectionController() {
     useState<SimulationResult | null>(null)
   const [simulationLoading, setSimulationLoading] = useState(false)
   const [simulationError, setSimulationError] = useState<string | null>(null)
+  const [bulkResult, setBulkResult] = useState<BulkSimulationResult | null>(null)
+  const [bulkLoading, setBulkLoading] = useState(false)
   const canRunSimulation = Boolean(playerA && playerB)
+  const busy = simulationLoading || bulkLoading
+
+  function selectPlayerA(player: PlayerProfile | null) {
+    setPlayerA(player)
+    setBulkResult(null)
+  }
+
+  function selectPlayerB(player: PlayerProfile | null) {
+    setPlayerB(player)
+    setBulkResult(null)
+  }
 
   async function runSimulation() {
     if (!playerA || !playerB) {
@@ -103,6 +129,43 @@ function PlayerSelectionController() {
     }
   }
 
+  async function runBulkSimulation() {
+    if (!playerA || !playerB) {
+      return
+    }
+
+    setBulkLoading(true)
+    setSimulationError(null)
+
+    try {
+      const response = await axios.post<BulkSimulationResult>(
+        `${API_BASE_URL}/simulate/bulk`,
+        {
+          player_a_id: playerA.player_id,
+          player_b_id: playerB.player_id,
+          n: BULK_SIM_COUNT,
+        }
+      )
+      setBulkResult(response.data)
+    } catch (error) {
+      // Fall back to looping the single-simulation endpoint client-side when
+      // the bulk endpoint is unavailable (e.g. an older backend without WO-20).
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        try {
+          setBulkResult(
+            await runBulkClientSide(playerA.player_id, playerB.player_id)
+          )
+        } catch (fallbackError) {
+          setSimulationError(getSimulationError(fallbackError))
+        }
+      } else {
+        setSimulationError(getSimulationError(error))
+      }
+    } finally {
+      setBulkLoading(false)
+    }
+  }
+
   return (
     <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-screen-xl flex-col px-4 py-6 md:px-6">
       <div className="mb-6 flex flex-col gap-3 border-b pb-5 md:flex-row md:items-end md:justify-between">
@@ -112,26 +175,44 @@ function PlayerSelectionController() {
             Select two players to stage a 1v1 matchup.
           </p>
         </div>
-        <Button
-          disabled={!canRunSimulation || simulationLoading}
-          className="w-full md:w-auto"
-          onClick={runSimulation}
-        >
-          {simulationLoading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Swords className="h-4 w-4" />
-          )}
-          {simulationResult ? "Re-run" : "Run Simulation"}
-        </Button>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button
+            disabled={!canRunSimulation || busy}
+            className="w-full sm:w-auto"
+            onClick={runSimulation}
+          >
+            {simulationLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Swords className="h-4 w-4" />
+            )}
+            {simulationResult ? "Re-run" : "Run Simulation"}
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={!canRunSimulation || busy}
+            className="w-full sm:w-auto"
+            onClick={runBulkSimulation}
+          >
+            {bulkLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Percent className="h-4 w-4" />
+            )}
+            {bulkLoading
+              ? "Running 1,000 simulations…"
+              : "Run 1,000 Simulations"}
+          </Button>
+        </div>
       </div>
 
       <div className="grid flex-1 grid-cols-1 gap-4 lg:grid-cols-[1fr_auto_1fr] lg:items-start">
         <PlayerSlot
           label="Player A"
           selectedPlayer={playerA}
-          onSelect={setPlayerA}
-          onClear={() => setPlayerA(null)}
+          onSelect={selectPlayerA}
+          onClear={() => selectPlayerA(null)}
+          winPct={bulkResult ? bulkResult.player_a_win_pct : null}
         />
         <div className="hidden h-full items-center justify-center lg:flex">
           <div className="flex h-12 w-12 items-center justify-center rounded-full border bg-muted text-sm font-semibold">
@@ -141,8 +222,9 @@ function PlayerSelectionController() {
         <PlayerSlot
           label="Player B"
           selectedPlayer={playerB}
-          onSelect={setPlayerB}
-          onClear={() => setPlayerB(null)}
+          onSelect={selectPlayerB}
+          onClear={() => selectPlayerB(null)}
+          winPct={bulkResult ? bulkResult.player_b_win_pct : null}
         />
       </div>
 
@@ -173,6 +255,7 @@ function PlayerSlot({
   selectedPlayer,
   onSelect,
   onClear,
+  winPct,
 }: PlayerSlotProps) {
   const [query, setQuery] = useState("")
   const { player, loading, error, searchPlayer, clearPlayer } = usePlayerSearch()
@@ -228,9 +311,16 @@ function PlayerSlot({
           <div className="space-y-5">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-2xl font-semibold leading-tight">
-                  {profile.name}
-                </h2>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-2xl font-semibold leading-tight">
+                    {profile.name}
+                  </h2>
+                  {winPct != null && (
+                    <Badge variant="secondary">
+                      Wins {Math.round(winPct)}%
+                    </Badge>
+                  )}
+                </div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {profile.position && <Badge>{profile.position}</Badge>}
                   {profile.team && <Badge variant="secondary">{profile.team}</Badge>}
@@ -475,6 +565,39 @@ function formatResult(result: string) {
 const SimulatorView = PlayerSelectionController
 
 export default SimulatorView
+
+async function runBulkClientSide(
+  playerAId: number,
+  playerBId: number
+): Promise<BulkSimulationResult> {
+  let playerAWins = 0
+  let playerBWins = 0
+  let ties = 0
+
+  for (let seed = 0; seed < BULK_SIM_COUNT; seed++) {
+    const response = await axios.post<SimulationResult>(
+      `${API_BASE_URL}/simulate`,
+      { player_a_id: playerAId, player_b_id: playerBId, seed }
+    )
+    const { a, b } = response.data.summary.final_score
+    if (a > b) {
+      playerAWins++
+    } else if (b > a) {
+      playerBWins++
+    } else {
+      ties++
+    }
+  }
+
+  return {
+    player_a_wins: playerAWins,
+    player_b_wins: playerBWins,
+    ties,
+    total_simulations: BULK_SIM_COUNT,
+    player_a_win_pct: Math.round((10000 * playerAWins) / BULK_SIM_COUNT) / 100,
+    player_b_win_pct: Math.round((10000 * playerBWins) / BULK_SIM_COUNT) / 100,
+  }
+}
 
 function getSimulationError(error: unknown) {
   if (axios.isAxiosError(error)) {
