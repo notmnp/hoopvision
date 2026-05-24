@@ -99,6 +99,46 @@ class SimulationEngineTest(unittest.TestCase):
 
         self.assertEqual(result["summary"]["data_warnings"], ["substituted wingspan"])
 
+    def test_elite_shot_blocker_lowers_make_probability(self):
+        offense = self.players[1]
+        defense = self.players[2]
+        elite = self.engine._make_probability(
+            0.5, {"block_rate": 0.18}, offense, defense
+        )
+        poor = self.engine._make_probability(
+            0.5, {"block_rate": 0.0}, offense, defense
+        )
+
+        self.assertLess(elite, poor)
+
+    def test_block_rate_dominates_physical_size_in_shot_contest(self):
+        # A small but elite shot blocker should contest better than a large
+        # but poor one, proving career skill is the primary factor (ADR-004).
+        small_elite_defender = {"height": "6-3", "wingspan": 78.0, "weight": 190}
+        big_poor_defender = {"height": "7-2", "wingspan": 90.0, "weight": 280}
+        offense = self.players[1]
+
+        elite = self.engine._make_probability(
+            0.5, {"block_rate": 0.22}, offense, small_elite_defender
+        )
+        poor = self.engine._make_probability(
+            0.5, {"block_rate": 0.0}, offense, big_poor_defender
+        )
+
+        self.assertLess(elite, poor)
+
+    def test_elite_thief_raises_turnover_rate(self):
+        offense = self.players[1]
+        defense = self.players[2]
+        elite = self.engine._defense_adjusted_turnover_rate(
+            0.08, {"steal_rate": 0.20}, offense, defense
+        )
+        poor = self.engine._defense_adjusted_turnover_rate(
+            0.08, {"steal_rate": 0.0}, offense, defense
+        )
+
+        self.assertGreater(elite, poor)
+
     def test_passes_opponent_height_bucket_to_profile_builder(self):
         self.players[1]["height"] = "6-4"
         self.players[2]["height"] = "7-0"

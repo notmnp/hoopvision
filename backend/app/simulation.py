@@ -12,6 +12,16 @@ from .matchup_data import MatchupDataService
 
 ProfileProvider = Callable[[int], dict[str, Any]]
 
+# ADR-004: the defender's career-derived block_rate and steal_rate are the
+# primary contest inputs; physical matchup factors are secondary modifiers.
+# Contest strength is measured as the defender's rate relative to a league
+# baseline, so an elite defender meaningfully suppresses the offense while a
+# poor defender concedes a slight edge.
+LEAGUE_AVERAGE_BLOCK_RATE = 0.04
+LEAGUE_AVERAGE_STEAL_RATE = 0.06
+BLOCK_CONTEST_WEIGHT = 0.6
+STEAL_PRESSURE_WEIGHT = 0.6
+
 
 @dataclass(frozen=True)
 class PlayByPlay:
@@ -103,6 +113,7 @@ class SimulationEngine:
             offense = player_a if offense_key == "a" else player_b
             defense = player_b if defense_key == "b" else player_a
             tendency = profile_a if offense_key == "a" else profile_b
+            defense_tendency = profile_b if offense_key == "a" else profile_a
 
             play = self._simulate_possession(
                 rng=rng,
@@ -111,6 +122,7 @@ class SimulationEngine:
                 offense=offense,
                 defense=defense,
                 tendency=tendency.to_dict(),
+                defense_tendency=defense_tendency.to_dict(),
                 scores=scores,
                 player_stats=stats[offense["name"]],
             )
@@ -141,12 +153,13 @@ class SimulationEngine:
         offense: dict[str, Any],
         defense: dict[str, Any],
         tendency: dict[str, Any],
+        defense_tendency: dict[str, Any],
         scores: dict[str, int],
         player_stats: PlayerSimStats,
     ) -> PlayByPlay:
         shot_type = self._choose_shot_type(rng, tendency["shot_type_distribution"])
         turnover_rate = self._defense_adjusted_turnover_rate(
-            tendency["turnover_rate"], offense, defense
+            tendency["turnover_rate"], defense_tendency, offense, defense
         )
 
         if rng.random() < turnover_rate:
@@ -181,6 +194,7 @@ class SimulationEngine:
         self._increment_shot_attempt(player_stats, shot_type)
         make_probability = self._make_probability(
             tendency["scoring_efficiency_by_shot_type"][shot_type],
+            defense_tendency,
             offense,
             defense,
         )
@@ -218,9 +232,19 @@ class SimulationEngine:
     def _make_probability(
         self,
         base_probability: float,
+        defense_tendency: dict[str, Any],
         offense: dict[str, Any],
         defense: dict[str, Any],
     ) -> float:
+        # Primary: the defender's career block rate contests the shot. An
+        # above-average shot blocker suppresses the make probability; a
+        # below-average one concedes a small edge.
+        block_contest = (
+            self._to_float(defense_tendency.get("block_rate"))
+            - LEAGUE_AVERAGE_BLOCK_RATE
+        ) * BLOCK_CONTEST_WEIGHT
+        # Secondary: physical presence still matters, particularly at the rim,
+        # but does not override career defensive skill.
         height_edge = (
             self._height_inches(offense.get("height"))
             - self._height_inches(defense.get("height"))
@@ -233,14 +257,27 @@ class SimulationEngine:
             self._to_float(offense.get("weight"))
             - self._to_float(defense.get("weight"))
         ) * 0.0005
-        return self._clamp(base_probability + height_edge + wingspan_edge + weight_edge)
+        return self._clamp(
+            base_probability
+            - block_contest
+            + height_edge
+            + wingspan_edge
+            + weight_edge
+        )
 
     def _defense_adjusted_turnover_rate(
         self,
         base_turnover_rate: float,
+        defense_tendency: dict[str, Any],
         offense: dict[str, Any],
         defense: dict[str, Any],
     ) -> float:
+        # Primary: the defender's career steal rate drives turnover pressure.
+        steal_pressure = (
+            self._to_float(defense_tendency.get("steal_rate"))
+            - LEAGUE_AVERAGE_STEAL_RATE
+        ) * STEAL_PRESSURE_WEIGHT
+        # Secondary: a longer-armed defender forces marginally more turnovers.
         wingspan_pressure = (
             max(
                 0.0,
@@ -249,7 +286,9 @@ class SimulationEngine:
             )
             * 0.0008
         )
-        return self._clamp(base_turnover_rate + wingspan_pressure, 0.04, 0.28)
+        return self._clamp(
+            base_turnover_rate + steal_pressure + wingspan_pressure, 0.04, 0.28
+        )
 
     @staticmethod
     def _increment_shot_attempt(player_stats: PlayerSimStats, shot_type: str) -> None:
