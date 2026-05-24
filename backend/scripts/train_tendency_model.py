@@ -36,8 +36,63 @@ from backend.app.nba_stats_client import (  # noqa: E402
 
 
 MODEL_VERSION = "v2_matchup_conditioned"
-DEFAULT_R2_FLOOR = 0.0
 DEFAULT_ARTIFACT_DIR = PROJECT_ROOT / "backend" / "data"
+
+# Hard per-bucket quality gate (NBA Data blueprint): an artifact is refused
+# promotion if any per-output per-bucket R² falls below the floor below.
+# Floors are differentiated by output predictability and by bucket — guard/wing
+# have the most training samples and highest expected R², while big/center have
+# fewer samples and higher statistical variance, warranting lower floors.
+DEFAULT_R2_FLOORS: dict[str, dict[str, float]] = {
+    "guard": {
+        "rim_frequency": 0.55,
+        "mid_range_frequency": 0.50,
+        "three_frequency": 0.60,
+        "rim_efficiency": 0.35,
+        "mid_range_efficiency": 0.30,
+        "three_efficiency": 0.35,
+        "foul_drawing_rate": 0.40,
+        "turnover_rate": 0.40,
+        "block_rate": 0.30,
+        "steal_rate": 0.35,
+    },
+    "wing": {
+        "rim_frequency": 0.55,
+        "mid_range_frequency": 0.50,
+        "three_frequency": 0.55,
+        "rim_efficiency": 0.35,
+        "mid_range_efficiency": 0.30,
+        "three_efficiency": 0.35,
+        "foul_drawing_rate": 0.40,
+        "turnover_rate": 0.40,
+        "block_rate": 0.30,
+        "steal_rate": 0.35,
+    },
+    "big": {
+        "rim_frequency": 0.55,
+        "mid_range_frequency": 0.45,
+        "three_frequency": 0.45,
+        "rim_efficiency": 0.35,
+        "mid_range_efficiency": 0.25,
+        "three_efficiency": 0.25,
+        "foul_drawing_rate": 0.35,
+        "turnover_rate": 0.40,
+        "block_rate": 0.30,
+        "steal_rate": 0.30,
+    },
+    "center": {
+        "rim_frequency": 0.50,
+        "mid_range_frequency": 0.40,
+        "three_frequency": 0.35,
+        "rim_efficiency": 0.30,
+        "mid_range_efficiency": 0.25,
+        "three_efficiency": 0.20,
+        "foul_drawing_rate": 0.30,
+        "turnover_rate": 0.35,
+        "block_rate": 0.30,
+        "steal_rate": 0.25,
+    },
+}
 HEIGHT_BUCKET_ORDINAL = {
     "guard": 0,
     "wing": 1,
@@ -95,12 +150,12 @@ class MetricSet:
 
 @dataclass(frozen=True)
 class ModelCalibrationReport:
-    r2_floor: float
+    r2_floors: dict[str, dict[str, float]]
     metrics_by_height_bucket: dict[str, dict[str, MetricSet]]
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "r2_floor": self.r2_floor,
+            "r2_floors": self.r2_floors,
             "metrics_by_height_bucket": {
                 bucket: {
                     target: asdict(metrics)
@@ -120,11 +175,11 @@ class TendencyModelTrainer:
         self,
         matchup_service: MatchupDataService = matchup_data_service,
         era_service: EraAdjustmentService = era_adjustment_service,
-        r2_floor: float = DEFAULT_R2_FLOOR,
+        r2_floors: dict[str, dict[str, float]] = DEFAULT_R2_FLOORS,
     ):
         self.matchup_service = matchup_service
         self.era_service = era_service
-        self.r2_floor = r2_floor
+        self.r2_floors = r2_floors
 
     def assemble_dataset(
         self,
@@ -400,16 +455,24 @@ class TendencyModelTrainer:
                     r2=round(float(r2), 6),
                 )
         return ModelCalibrationReport(
-            r2_floor=self.r2_floor,
+            r2_floors=self.r2_floors,
             metrics_by_height_bucket=metrics_by_bucket,
         )
 
     def _validate_calibration(self, report: ModelCalibrationReport) -> None:
         failures = []
         for bucket, target_metrics in report.metrics_by_height_bucket.items():
+            bucket_floors = self.r2_floors.get(bucket)
+            if not bucket_floors:
+                continue
             for target, metrics in target_metrics.items():
-                if metrics.r2 < self.r2_floor:
-                    failures.append(f"{bucket}.{target} r2={metrics.r2}")
+                floor = bucket_floors.get(target)
+                if floor is None:
+                    continue
+                if metrics.r2 < floor:
+                    failures.append(
+                        f"{bucket}.{target} r2={metrics.r2} < floor={floor}"
+                    )
         if failures:
             raise CalibrationError(
                 "Model calibration below promotion floor: " + ", ".join(failures)
@@ -503,13 +566,30 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_ARTIFACT_DIR)
     parser.add_argument("--limit-players", type=int, default=None)
-    parser.add_argument("--r2-floor", type=float, default=DEFAULT_R2_FLOOR)
+    parser.add_argument(
+        "--r2-floor-override",
+        type=float,
+        default=None,
+        help=(
+            "Debugging aid: substitute this single R² value for every "
+            "(bucket, target) pair, overriding DEFAULT_R2_FLOORS."
+        ),
+    )
     return parser.parse_args()
+
+
+def _resolve_r2_floors(override: float | None) -> dict[str, dict[str, float]]:
+    if override is None:
+        return DEFAULT_R2_FLOORS
+    return {
+        bucket: {target: override for target in targets}
+        for bucket, targets in DEFAULT_R2_FLOORS.items()
+    }
 
 
 def main() -> None:
     args = parse_args()
-    trainer = TendencyModelTrainer(r2_floor=args.r2_floor)
+    trainer = TendencyModelTrainer(r2_floors=_resolve_r2_floors(args.r2_floor_override))
     rows = trainer.assemble_dataset(limit_players=args.limit_players)
     artifact = trainer.train(rows)
     output_path = trainer.write_artifact(artifact, args.output_dir)

@@ -92,7 +92,7 @@ class TendencyModelTrainerTest(unittest.TestCase):
     def setUp(self):
         self.trainer = TendencyModelTrainer(
             matchup_service=StubMatchupService(),
-            r2_floor=-10.0,
+            r2_floors={},
         )
 
     def test_assembles_rows_for_tracking_era_player_buckets(self):
@@ -147,9 +147,13 @@ class TendencyModelTrainerTest(unittest.TestCase):
             for player_id in [1, 2, 3]:
                 rows.extend(self.trainer.assemble_dataset(player_ids=[player_id]))
 
+        # A floor above the maximum possible R² (1.0) for a single
+        # (bucket, target) pair forces the calibration gate to fail. The "big"
+        # bucket is always present in the evaluation set (sparse rows are
+        # appended there), so the gate reliably sees this floor.
         strict_trainer = TendencyModelTrainer(
             matchup_service=StubMatchupService(),
-            r2_floor=2.0,
+            r2_floors={"big": {"rim_frequency": 2.0}},
         )
         with self.assertRaises(CalibrationError):
             strict_trainer.train(rows)
