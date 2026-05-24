@@ -1,9 +1,26 @@
 import { useState } from "react"
-import { Link } from "react-router-dom"
+import { Link, NavLink } from "react-router-dom"
+import { Menu } from "lucide-react"
+
 import { Button } from "@/components/ui/button"
 import { ModeToggle } from "@/components/ui/mode-toggle"
-import { Menu, X } from "lucide-react"
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet"
 import { useTheme } from "@/components/ui/theme-provider"
+import { cn } from "@/lib/utils"
+
+const NAV_ITEMS = [
+  { to: "/live", label: "Live Scores" },
+  { to: "/simulate", label: "Simulator" },
+  { to: "/teams", label: "Teams" },
+  { to: "/predictions", label: "Predictions" },
+]
 
 export function Navbar() {
   const { theme } = useTheme()
@@ -13,73 +30,67 @@ export function Navbar() {
     theme === "dark" ? "/img/logo_white.svg" : "/img/logo_black.svg"
 
   return (
-    <header className="w-full border-b relative z-50">
-      <div className="flex h-16 items-center justify-between px-4 md:px-6 mx-auto w-full max-w-screen-xl">
-        {/* Logo */}
-        <Link to="/" className="flex items-center gap-2">
-          <img src={logoSrc} alt="IsoLab logo" className="h-6 w-6" />
-          <span className="text-lg font-bold">IsoLab</span>
+    <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <div className="mx-auto flex h-16 w-full max-w-screen-xl items-center justify-between px-4 md:px-6">
+        <Link to="/" className="flex items-center" aria-label="IsoLab home">
+          <img src={logoSrc} alt="IsoLab" className="h-8 w-8" />
         </Link>
 
-        {/* Desktop nav */}
-        <nav className="hidden md:flex items-center gap-6">
-          <Link to="/live" className="text-sm font-medium hover:underline">
-            Live Scores
-          </Link>
-          <Link to="/simulate" className="text-sm font-medium hover:underline">
-            Simulator
-          </Link>
-          <Link to="/teams" className="text-sm font-medium hover:underline">
-            Teams
-          </Link>
-          <Link to="/predictions" className="text-sm font-medium hover:underline">
-            Predictions
-          </Link>
-          <ModeToggle />
+        <nav className="hidden items-center gap-1 md:flex">
+          {NAV_ITEMS.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) =>
+                cn(
+                  "rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+                  isActive && "text-foreground"
+                )
+              }
+            >
+              {item.label}
+            </NavLink>
+          ))}
+          <div className="ml-2">
+            <ModeToggle />
+          </div>
         </nav>
 
-        {/* Mobile toggle */}
-        <div className="md:hidden flex items-center gap-2">
+        <div className="flex items-center gap-2 md:hidden">
           <ModeToggle />
-          <Button variant="ghost" size="icon" onClick={() => setMobileOpen(!mobileOpen)}>
-            {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-          </Button>
+          <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+            <SheetTrigger asChild>
+              <Button variant="ghost" size="icon" aria-label="Open menu">
+                <Menu className="h-5 w-5" />
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="right" className="w-72">
+              <SheetHeader>
+                <SheetTitle>
+                  <img src={logoSrc} alt="IsoLab" className="h-9 w-9" />
+                </SheetTitle>
+              </SheetHeader>
+              <nav className="mt-2 flex flex-col gap-1 px-2">
+                {NAV_ITEMS.map((item) => (
+                  <SheetClose asChild key={item.to}>
+                    <NavLink
+                      to={item.to}
+                      className={({ isActive }) =>
+                        cn(
+                          "rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+                          isActive && "bg-accent text-foreground"
+                        )
+                      }
+                    >
+                      {item.label}
+                    </NavLink>
+                  </SheetClose>
+                ))}
+              </nav>
+            </SheetContent>
+          </Sheet>
         </div>
       </div>
-
-      {/* Mobile menu (appears below navbar) */}
-      {mobileOpen && (
-        <div className="absolute top-full left-0 right-0 bg-background border-t border-b md:hidden px-4 py-4 space-y-3 shadow-lg z-40">
-          <Link
-            to="/live"
-            onClick={() => setMobileOpen(false)}
-            className="block text-sm font-medium hover:underline"
-          >
-            Live Scores
-          </Link>
-          <Link
-            to="/simulate"
-            onClick={() => setMobileOpen(false)}
-            className="block text-sm font-medium hover:underline"
-          >
-            Simulator
-          </Link>
-          <Link
-            to="/teams"
-            onClick={() => setMobileOpen(false)}
-            className="block text-sm font-medium hover:underline"
-          >
-            Teams
-          </Link>
-          <Link
-            to="/predictions"
-            onClick={() => setMobileOpen(false)}
-            className="block text-sm font-medium hover:underline"
-          >
-            Predictions
-          </Link>
-        </div>
-      )}
     </header>
   )
 }

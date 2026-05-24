@@ -115,6 +115,26 @@ class SimulationEngineTest(unittest.TestCase):
         # Profiles are built once per matchup, not once per simulation.
         self.assertEqual(len(self.profile_builder.calls), 2)
 
+    def test_player_stats_include_scoring_breakdown(self):
+        result = self.engine.simulate(1, 2, seed=5)
+
+        for stats in result["summary"]["player_stats"].values():
+            self.assertIn("shooting_percentage", stats)
+            self.assertIn("three_point_percentage", stats)
+            self.assertIn("shot_type_distribution", stats)
+            self.assertIn("shot_type_percentage", stats)
+            self.assertEqual(
+                set(stats["shot_type_distribution"]),
+                {"rim", "mid_range", "three"},
+            )
+            self.assertEqual(
+                set(stats["shot_type_percentage"]),
+                {"rim", "mid_range", "three"},
+            )
+            for zone_pct in stats["shot_type_percentage"].values():
+                self.assertGreaterEqual(zone_pct, 0.0)
+                self.assertLessEqual(zone_pct, 1.0)
+
     def test_player_stats_expose_confidence_tier_per_player(self):
         profile_builder = StubProfileBuilder(
             confidence_tiers={1: "HIGH", 2: "LOW"}

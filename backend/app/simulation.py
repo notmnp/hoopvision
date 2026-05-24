@@ -48,6 +48,9 @@ class PlayerSimStats:
     rim_attempts: int = 0
     mid_range_attempts: int = 0
     three_attempts: int = 0
+    rim_made: int = 0
+    mid_range_made: int = 0
+    three_pointers_made: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         attempts = self.field_goals_attempted
@@ -56,14 +59,26 @@ class PlayerSimStats:
             "shooting_percentage": (
                 round(self.field_goals_made / attempts, 4) if attempts else 0.0
             ),
+            "three_point_percentage": self._rate(
+                self.three_pointers_made, self.three_attempts
+            ),
             "shot_type_distribution": {
                 "rim": self.rim_attempts,
                 "mid_range": self.mid_range_attempts,
                 "three": self.three_attempts,
             },
+            "shot_type_percentage": {
+                "rim": self._rate(self.rim_made, self.rim_attempts),
+                "mid_range": self._rate(self.mid_range_made, self.mid_range_attempts),
+                "three": self._rate(self.three_pointers_made, self.three_attempts),
+            },
             "turnovers": self.turnovers,
             "fouls_drawn": self.fouls_drawn,
         }
+
+    @staticmethod
+    def _rate(made: int, attempts: int) -> float:
+        return round(made / attempts, 4) if attempts else 0.0
 
 
 @dataclass(frozen=True)
@@ -278,6 +293,12 @@ class SimulationEngine:
             player_stats.field_goals_made += 1
             player_stats.points += points
             scores[offense_key] += points
+            if shot_type == "three":
+                player_stats.three_pointers_made += 1
+            elif shot_type == "rim":
+                player_stats.rim_made += 1
+            else:
+                player_stats.mid_range_made += 1
 
         return PlayByPlay(
             possession=possession,
