@@ -64,9 +64,13 @@ class MatchupDataServiceTest(unittest.TestCase):
                         },
                     ]
                 },
-                "commonplayerinfo:10": {"CommonPlayerInfo": [{"HEIGHT": "6-5"}]},
-                "commonplayerinfo:11": {"CommonPlayerInfo": [{"HEIGHT": "6-7"}]},
-                "commonplayerinfo:12": {"CommonPlayerInfo": [{"HEIGHT": "7-0"}]},
+                "leaguedashplayerbiostats:2024": {
+                    "LeagueDashPlayerBioStats": [
+                        {"PLAYER_ID": 10, "PLAYER_HEIGHT_INCHES": 77},
+                        {"PLAYER_ID": 11, "PLAYER_HEIGHT_INCHES": 79},
+                        {"PLAYER_ID": 12, "PLAYER_HEIGHT_INCHES": 84},
+                    ]
+                },
                 "shotchartdetail:2024:203999": {
                     "Shot_Chart_Detail": [
                         {
@@ -114,7 +118,11 @@ class MatchupDataServiceTest(unittest.TestCase):
                         {"DEF_PLAYER_ID": 12, "PARTIAL_POSS": 99},
                     ]
                 },
-                "commonplayerinfo:12": {"CommonPlayerInfo": [{"HEIGHT": "7-0"}]},
+                "leaguedashplayerbiostats:2024": {
+                    "LeagueDashPlayerBioStats": [
+                        {"PLAYER_ID": 12, "PLAYER_HEIGHT_INCHES": 84},
+                    ]
+                },
             }
 
             stats = self.service.get_matchup_stats(893, "guard")
@@ -133,7 +141,11 @@ class MatchupDataServiceTest(unittest.TestCase):
                         {"DEF_PLAYER_ID": 10, "PARTIAL_POSS": 12},
                     ]
                 },
-                "commonplayerinfo:10": {"CommonPlayerInfo": [{"HEIGHT": "6-4"}]},
+                "leaguedashplayerbiostats:2024": {
+                    "LeagueDashPlayerBioStats": [
+                        {"PLAYER_ID": 10, "PLAYER_HEIGHT_INCHES": 76},
+                    ]
+                },
                 "shotchartdetail:2024:203999": {"Shot_Chart_Detail": []},
             }
 

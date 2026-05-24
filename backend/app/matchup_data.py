@@ -3,7 +3,7 @@ from datetime import date
 from typing import Any
 
 from nba_api.stats.endpoints import (
-    commonplayerinfo,
+    leaguedashplayerbiostats,
     leagueseasonmatchups,
     shotchartdetail,
 )
@@ -74,10 +74,14 @@ class MatchupDataService:
     ) -> MatchupConditionedStats:
         normalized_bucket = self._normalize_height_bucket(height_bucket)
         matchup_rows = self._fetch_tracking_matchups(player_id)
+        if not matchup_rows:
+            return self._empty_stats(normalized_bucket)
+
+        defender_buckets = self._defender_height_index()
         conditioned_rows = [
             row
             for row in matchup_rows
-            if self._defender_height_bucket(row.get("DEF_PLAYER_ID"))
+            if defender_buckets.get(self._coerce_player_id(row.get("DEF_PLAYER_ID")))
             == normalized_bucket
         ]
 
@@ -167,28 +171,34 @@ class MatchupDataService:
             rows.extend(data.get("Shot_Chart_Detail", []))
         return self._aggregate_zone_data(rows)
 
-    def _defender_height_bucket(self, defender_player_id: Any) -> str | None:
-        try:
-            player_id = int(defender_player_id)
-        except (TypeError, ValueError):
-            return None
+    def _defender_height_index(self) -> dict[int, str]:
+        """Map player_id -> height bucket for every tracking-era player.
 
-        if player_id <= 0:
-            return None
-
-        data = fetch_stats_data(
-            f"commonplayerinfo:{player_id}",
-            lambda: commonplayerinfo.CommonPlayerInfo(
-                player_id=player_id,
-                headers=NBA_STATS_HEADERS.copy(),
-                timeout=NBA_STATS_TIMEOUT_SECONDS,
-            ),
-        )
-        record = self._first_record(data, "CommonPlayerInfo")
-        height_inches = self._parse_height_inches(record.get("HEIGHT"))
-        if height_inches is None:
-            return None
-        return self.height_bucket_for_inches(height_inches)
+        Defender heights are resolved from one bulk LeagueDashPlayerBioStats
+        call per season (cached) rather than a per-defender CommonPlayerInfo
+        call. A single star can face hundreds of distinct defenders per season,
+        so the per-defender approach issued thousands of throttled requests and
+        made a simulation effectively never finish.
+        """
+        index: dict[int, str] = {}
+        for season in self._tracking_seasons():
+            data = fetch_stats_data(
+                f"leaguedashplayerbiostats:{season}",
+                lambda season=season: leaguedashplayerbiostats.LeagueDashPlayerBioStats(
+                    season=self._season_label(season),
+                    headers=NBA_STATS_HEADERS.copy(),
+                    timeout=NBA_STATS_TIMEOUT_SECONDS,
+                ),
+            )
+            for row in data.get("LeagueDashPlayerBioStats", []):
+                player_id = self._coerce_player_id(row.get("PLAYER_ID"))
+                if player_id is None or player_id in index:
+                    continue
+                height_inches = self._to_float(row.get("PLAYER_HEIGHT_INCHES"))
+                if height_inches <= 0:
+                    continue
+                index[player_id] = self.height_bucket_for_inches(height_inches)
+        return index
 
     @staticmethod
     def _aggregate_zone_data(rows: list[dict[str, Any]]) -> list[ZoneShotData]:
@@ -271,23 +281,12 @@ class MatchupDataService:
         return "center"
 
     @staticmethod
-    def _parse_height_inches(value: Any) -> float | None:
-        if value in (None, "", "NA", "N/A", "-"):
-            return None
-        if isinstance(value, (int, float)):
-            return float(value)
-
-        parts = str(value).strip().split("-")
-        if len(parts) == 2:
-            try:
-                return int(parts[0]) * 12 + float(parts[1])
-            except ValueError:
-                return None
-
+    def _coerce_player_id(value: Any) -> int | None:
         try:
-            return float(value)
+            player_id = int(value)
         except (TypeError, ValueError):
             return None
+        return player_id if player_id > 0 else None
 
     @staticmethod
     def _empty_stats(height_bucket: str) -> MatchupConditionedStats:
@@ -303,11 +302,6 @@ class MatchupDataService:
             zone_data=[],
             height_bucket=height_bucket,
         )
-
-    @staticmethod
-    def _first_record(data: dict[str, Any], key: str) -> dict[str, Any]:
-        records = data.get(key, [])
-        return records[0] if records else {}
 
     @staticmethod
     def _to_float(value: Any) -> float:
