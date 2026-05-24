@@ -3,10 +3,10 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Routes, Route } from "react-router-dom"
 import { ThemeProvider } from "./components/ui/theme-provider.tsx"
 import './index.css'
-import Navbar from './assets/Navbar.tsx'
-import Home from './assets/Home.tsx'
-import Scoreboard from './assets/Scoreboard.tsx'
-import Simulator from './assets/Simulator.tsx'
+import Navbar from './pages/Navbar.tsx'
+import Home from './pages/Home.tsx'
+import Scoreboard from './pages/Scoreboard.tsx'
+import Simulator from './pages/Simulator.tsx'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
