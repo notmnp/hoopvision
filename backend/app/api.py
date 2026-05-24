@@ -68,6 +68,26 @@ class SimulationRequest(BaseModel):
     seed: int | None = None
 
 
+# Upper bound on bulk simulation count, configurable so deployments can tune
+# the per-request work ceiling without code changes.
+BULK_SIM_MAX_N = int(os.getenv("BULK_SIM_MAX_N", "1000"))
+
+
+class BulkSimulationRequest(BaseModel):
+    player_a_id: int = Field(gt=0)
+    player_b_id: int = Field(gt=0)
+    n: int = Field(default=1000, gt=0)
+
+
+class BulkSimulationResult(BaseModel):
+    player_a_wins: int
+    player_b_wins: int
+    ties: int
+    total_simulations: int
+    player_a_win_pct: float
+    player_b_win_pct: float
+
+
 def _normalize_name(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
 
@@ -395,4 +415,24 @@ async def simulate_matchup(request: SimulationRequest):
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to run simulation: {str(e)}"
+        )
+
+
+@app.post("/simulate/bulk", tags=["iso"], response_model=BulkSimulationResult)
+async def simulate_bulk(request: BulkSimulationRequest):
+    if request.player_a_id == request.player_b_id:
+        raise HTTPException(status_code=400, detail="Players must be different")
+
+    # Runs in-process and sequentially per ADR-002. Profiles are built once and
+    # the game loop is replayed across seeds, so the cost scales with N rather
+    # than re-fetching player data each run. If per-request computation time
+    # grows unacceptable, a task-queue pattern (e.g. Celery + Redis) is the
+    # appropriate next step.
+    n = min(request.n, BULK_SIM_MAX_N)
+    try:
+        engine = SimulationEngine(profile_provider=_get_player_profile_by_id)
+        return engine.simulate_bulk(request.player_a_id, request.player_b_id, n)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to run bulk simulation: {str(e)}"
         )

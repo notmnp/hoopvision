@@ -92,6 +92,24 @@ class SimulationEngineTest(unittest.TestCase):
 
         self.assertEqual(first, second)
 
+    def test_simulate_bulk_aggregates_win_counts(self):
+        result = self.engine.simulate_bulk(1, 2, n=25)
+
+        self.assertEqual(result["total_simulations"], 25)
+        self.assertEqual(
+            result["player_a_wins"] + result["player_b_wins"] + result["ties"], 25
+        )
+        self.assertAlmostEqual(
+            result["player_a_win_pct"],
+            round(100 * result["player_a_wins"] / 25, 2),
+        )
+
+    def test_simulate_bulk_builds_profiles_once(self):
+        self.engine.simulate_bulk(1, 2, n=10)
+
+        # Profiles are built once per matchup, not once per simulation.
+        self.assertEqual(len(self.profile_builder.calls), 2)
+
     def test_collects_data_warnings(self):
         self.players[1]["data_warnings"] = ["substituted wingspan"]
 
@@ -242,6 +260,41 @@ class SimulateEndpointTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), expected)
+
+    def test_post_simulate_bulk_validates_distinct_players(self):
+        client = TestClient(api.app)
+
+        response = client.post(
+            "/simulate/bulk",
+            json={"player_a_id": 1, "player_b_id": 1, "n": 10},
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_post_simulate_bulk_caps_n_and_returns_result(self):
+        client = TestClient(api.app)
+        expected = {
+            "player_a_wins": 600,
+            "player_b_wins": 400,
+            "ties": 0,
+            "total_simulations": 1000,
+            "player_a_win_pct": 60.0,
+            "player_b_win_pct": 40.0,
+        }
+
+        with patch("backend.app.api.SimulationEngine") as engine_class:
+            engine_class.return_value.simulate_bulk.return_value = expected
+
+            response = client.post(
+                "/simulate/bulk",
+                json={"player_a_id": 1, "player_b_id": 2, "n": 999999},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), expected)
+        engine_class.return_value.simulate_bulk.assert_called_once_with(
+            1, 2, api.BULK_SIM_MAX_N
+        )
 
 
 if __name__ == "__main__":

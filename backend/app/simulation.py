@@ -66,6 +66,22 @@ class PlayerSimStats:
         }
 
 
+@dataclass(frozen=True)
+class PreparedMatchup:
+    """Player dicts and tendency profiles built once and replayed across games.
+
+    Profile construction is the expensive part of a simulation (it can hit the
+    NBA Stats API); the per-possession game loop is cheap. Separating the two
+    lets bulk runs build profiles once and replay the loop N times.
+    """
+
+    player_a: dict[str, Any]
+    player_b: dict[str, Any]
+    profile_a: Any
+    profile_b: Any
+    data_warnings: list[str]
+
+
 class SimulationEngine:
     def __init__(
         self,
@@ -78,7 +94,37 @@ class SimulationEngine:
     def simulate(
         self, player_a_id: int, player_b_id: int, seed: int | None = None
     ) -> dict[str, Any]:
-        rng = random.Random(seed)
+        matchup = self._prepare_matchup(player_a_id, player_b_id)
+        return self._play_game(matchup, random.Random(seed))
+
+    def simulate_bulk(
+        self, player_a_id: int, player_b_id: int, n: int
+    ) -> dict[str, Any]:
+        matchup = self._prepare_matchup(player_a_id, player_b_id)
+        player_a_wins = 0
+        player_b_wins = 0
+        ties = 0
+        for seed in range(n):
+            scores, _, _ = self._run_possessions(matchup, random.Random(seed))
+            if scores["a"] > scores["b"]:
+                player_a_wins += 1
+            elif scores["b"] > scores["a"]:
+                player_b_wins += 1
+            else:
+                ties += 1
+
+        return {
+            "player_a_wins": player_a_wins,
+            "player_b_wins": player_b_wins,
+            "ties": ties,
+            "total_simulations": n,
+            "player_a_win_pct": round(100 * player_a_wins / n, 2) if n else 0.0,
+            "player_b_win_pct": round(100 * player_b_wins / n, 2) if n else 0.0,
+        }
+
+    def _prepare_matchup(
+        self, player_a_id: int, player_b_id: int
+    ) -> PreparedMatchup:
         player_a = self.profile_provider(player_a_id)
         player_b = self.profile_provider(player_b_id)
         player_a_defender_bucket = self._height_bucket(player_b.get("height"))
@@ -95,16 +141,28 @@ class SimulationEngine:
             career_start_year=player_b.get("from_year"),
             career_end_year=player_b.get("to_year"),
         )
+        data_warnings = self._collect_data_warnings(
+            player_a, player_b, profile_a, profile_b
+        )
+        return PreparedMatchup(
+            player_a=player_a,
+            player_b=player_b,
+            profile_a=profile_a,
+            profile_b=profile_b,
+            data_warnings=data_warnings,
+        )
 
+    def _run_possessions(
+        self, matchup: PreparedMatchup, rng: random.Random
+    ) -> tuple[dict[str, int], dict[str, PlayerSimStats], list[PlayByPlay]]:
+        player_a, player_b = matchup.player_a, matchup.player_b
+        profile_a, profile_b = matchup.profile_a, matchup.profile_b
         scores = {"a": 0, "b": 0}
         stats = {
             player_a["name"]: PlayerSimStats(),
             player_b["name"]: PlayerSimStats(),
         }
         play_by_play: list[PlayByPlay] = []
-        data_warnings = self._collect_data_warnings(
-            player_a, player_b, profile_a, profile_b
-        )
 
         possession = 1
         while scores["a"] < 21 and scores["b"] < 21:
@@ -129,8 +187,16 @@ class SimulationEngine:
             play_by_play.append(play)
             possession += 1
 
+        return scores, stats, play_by_play
+
+    def _play_game(
+        self, matchup: PreparedMatchup, rng: random.Random
+    ) -> dict[str, Any]:
+        scores, stats, play_by_play = self._run_possessions(matchup, rng)
         winner_key = "a" if scores["a"] >= 21 else "b"
-        winner = player_a["name"] if winner_key == "a" else player_b["name"]
+        winner = (
+            matchup.player_a["name"] if winner_key == "a" else matchup.player_b["name"]
+        )
 
         return {
             "play_by_play": [play.to_dict() for play in play_by_play],
@@ -141,7 +207,7 @@ class SimulationEngine:
                     player_name: player_stats.to_dict()
                     for player_name, player_stats in stats.items()
                 },
-                "data_warnings": data_warnings,
+                "data_warnings": matchup.data_warnings,
             },
         }
 
