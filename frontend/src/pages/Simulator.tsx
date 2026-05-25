@@ -74,6 +74,8 @@ import {
   PlayerSimStats,
   SimulationResult,
 } from "@/lib/simulation"
+import TendencyComparisonPanel from "@/pages/TendencyComparisonPanel"
+import ShotChartSheet, { ShotChartTarget } from "@/pages/ShotChartSheet"
 
 type SlotLabel = "Player A" | "Player B"
 
@@ -130,6 +132,7 @@ interface PlayerSlotProps {
   onSelect: (player: PlayerProfile) => void
   onClear: () => void
   onSeasonSelect: (seasonId: string | null) => void
+  onSeasonStatsChange?: (stats: PlayerSeasonStats | null) => void
   confidenceTier?: ConfidenceTier | null
 }
 
@@ -138,6 +141,13 @@ function PlayerSelectionController() {
   const [playerB, setPlayerB] = useState<PlayerProfile | null>(null)
   const [seasonA, setSeasonA] = useState<string | null>(null)
   const [seasonB, setSeasonB] = useState<string | null>(null)
+  // Per-season stats bubble up from each PlayerSlot (which already fetched them)
+  // so the TendencyComparisonPanel can read them without issuing new API calls.
+  const [seasonStatsA, setSeasonStatsA] = useState<PlayerSeasonStats | null>(null)
+  const [seasonStatsB, setSeasonStatsB] = useState<PlayerSeasonStats | null>(null)
+  const [shotChartTarget, setShotChartTarget] = useState<ShotChartTarget | null>(
+    null
+  )
   const [possessionMode, setPossessionMode] =
     useState<PossessionMode>("make_it_take_it")
   const [simulationResult, setSimulationResult] =
@@ -321,6 +331,7 @@ function PlayerSelectionController() {
           onSelect={selectPlayerA}
           onClear={() => selectPlayerA(null)}
           onSeasonSelect={selectSeasonA}
+          onSeasonStatsChange={setSeasonStatsA}
           confidenceTier={
             playerA
               ? simulationResult?.summary.player_stats[playerA.name]
@@ -340,6 +351,7 @@ function PlayerSelectionController() {
           onSelect={selectPlayerB}
           onClear={() => selectPlayerB(null)}
           onSeasonSelect={selectSeasonB}
+          onSeasonStatsChange={setSeasonStatsB}
           confidenceTier={
             playerB
               ? simulationResult?.summary.player_stats[playerB.name]
@@ -348,6 +360,41 @@ function PlayerSelectionController() {
           }
         />
       </div>
+
+      {/* Tendency Explorer comparison panel: appears automatically once both
+          players and seasons are confirmed and their season stats have loaded,
+          below the player cards and ahead of the simulation results. The
+          season_id guard avoids rendering against a previous season's stats
+          while a newly selected season is still loading. */}
+      {playerA &&
+        playerB &&
+        seasonA &&
+        seasonB &&
+        seasonStatsA?.season_id === seasonA &&
+        seasonStatsB?.season_id === seasonB && (
+          <TendencyComparisonPanel
+            playerA={playerA}
+            playerB={playerB}
+            seasonA={seasonA}
+            seasonB={seasonB}
+            statsA={seasonStatsA}
+            statsB={seasonStatsB}
+            onViewShotChart={(player, seasonId) =>
+              setShotChartTarget({
+                playerId: player.player_id,
+                playerName: player.name,
+                seasonId,
+              })
+            }
+          />
+        )}
+
+      <ShotChartSheet
+        target={shotChartTarget}
+        onOpenChange={(open) => {
+          if (!open) setShotChartTarget(null)
+        }}
+      />
 
       {simulationError && (
         <Alert variant="destructive" className="mt-5">
@@ -388,6 +435,7 @@ function PlayerSlot({
   onSelect,
   onClear,
   onSeasonSelect,
+  onSeasonStatsChange,
   confidenceTier,
 }: PlayerSlotProps) {
   const [query, setQuery] = useState("")
@@ -448,6 +496,12 @@ function PlayerSlot({
     document.addEventListener("mousedown", handlePointerDown)
     return () => document.removeEventListener("mousedown", handlePointerDown)
   }, [])
+
+  // Bubble the loaded season stats up to the parent so TendencyComparisonPanel
+  // can read them without re-fetching. onSeasonStatsChange is a stable setter.
+  useEffect(() => {
+    onSeasonStatsChange?.(seasonStats)
+  }, [seasonStats, onSeasonStatsChange])
 
   // Confirm a freshly searched player: close the suggestions dropdown, load the
   // player's seasons, then default the selection to the most recent one (the
