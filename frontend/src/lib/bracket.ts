@@ -2,6 +2,10 @@
 // (backend/app/bracket.py). Consumed by BracketSetupController, BracketView, and
 // BracketExporter.
 
+import { SimulationResult } from "@/lib/simulation"
+
+export type { SimulationResult }
+
 export type PossessionMode = "make_it_take_it" | "alternating"
 export type BracketSize = 4 | 8 | 16
 export type SeriesFormat = 1 | 3 | 5 | 7
@@ -23,32 +27,6 @@ export interface BracketConfig {
 export interface SeriesWins {
   a: number
   b: number
-}
-
-// One game's result, matching SimulationEngine.simulate(). Kept loose on the
-// inner shapes the bracket UI doesn't itself read; the series drill-down reuses
-// IsoLab's own PlayByPlay/MatchSummary views for the detail.
-export interface SimulationResult {
-  play_by_play: PlayByPlay[]
-  summary: MatchSummary
-}
-
-export interface PlayByPlay {
-  possession: number
-  offensive_player: string
-  shot_type: string
-  result: string
-  foul: boolean
-  turnover: boolean
-  score_a: number
-  score_b: number
-}
-
-export interface MatchSummary {
-  winner: string
-  final_score: { a: number; b: number }
-  player_stats: Record<string, unknown>
-  data_warnings: string[]
 }
 
 export interface BracketMatchup {

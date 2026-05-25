@@ -67,6 +67,13 @@ import {
   usePlayerSeasons,
   usePlayerSeasonStats,
 } from "@/hooks/usePlayerSeasons"
+import {
+  ConfidenceTier,
+  MatchSummary,
+  PlayByPlay,
+  PlayerSimStats,
+  SimulationResult,
+} from "@/lib/simulation"
 
 type SlotLabel = "Player A" | "Player B"
 
@@ -98,58 +105,11 @@ const POSSESSION_MODES: {
 // One revealed possession per tick while the play-by-play log animates in.
 const PLAY_BY_PLAY_TICK_MS = 120
 
-type ConfidenceTier = "HIGH" | "MEDIUM" | "LOW"
-
 const CONFIDENCE_TOOLTIPS: Record<ConfidenceTier, string> = {
   HIGH: "HIGH confidence: sufficient matchup tracking data available for this player.",
   MEDIUM:
     "MEDIUM confidence: post-tracking era player with limited observed data.",
   LOW: "LOW confidence: pre-tracking era or statistical outlier — model-generalized profile.",
-}
-
-interface PlayByPlay {
-  possession: number
-  offensive_player: string
-  shot_type: string
-  result: string
-  foul: boolean
-  turnover: boolean
-  score_a: number
-  score_b: number
-}
-
-interface PlayerSimStats {
-  points: number
-  shooting_percentage: number
-  three_point_percentage: number
-  shot_type_distribution: {
-    rim: number
-    mid_range: number
-    three: number
-  }
-  shot_type_percentage: {
-    rim: number
-    mid_range: number
-    three: number
-  }
-  turnovers: number
-  fouls_drawn: number
-  confidence_tier?: ConfidenceTier
-}
-
-interface MatchSummary {
-  winner: string
-  final_score: {
-    a: number
-    b: number
-  }
-  player_stats: Record<string, PlayerSimStats>
-  data_warnings: string[]
-}
-
-interface SimulationResult {
-  play_by_play: PlayByPlay[]
-  summary: MatchSummary
 }
 
 interface BulkSimulationResult {
@@ -409,8 +369,8 @@ function PlayerSelectionController() {
         <div className="mt-6 grid gap-4 xl:grid-cols-[24rem_1fr]">
           <MatchSummaryView
             summary={simulationResult.summary}
-            playerA={playerA}
-            playerB={playerB}
+            playerAName={playerA.name}
+            playerBName={playerB.name}
             onRerun={runSimulation}
             rerunDisabled={busy}
           />
@@ -1116,18 +1076,21 @@ function WarningAlert({ warnings }: { warnings: string[] }) {
   )
 }
 
-function MatchSummaryView({
+// Exported so the GOAT Bracket series drill-down can render the same match
+// summary per game. `onRerun` is optional — the bracket has no re-run action, so
+// the button is hidden there.
+export function MatchSummaryView({
   summary,
-  playerA,
-  playerB,
+  playerAName,
+  playerBName,
   onRerun,
   rerunDisabled,
 }: {
   summary: MatchSummary
-  playerA: PlayerProfile
-  playerB: PlayerProfile
-  onRerun: () => void
-  rerunDisabled: boolean
+  playerAName: string
+  playerBName: string
+  onRerun?: () => void
+  rerunDisabled?: boolean
 }) {
   const aWon = summary.final_score.a >= summary.final_score.b
   return (
@@ -1145,12 +1108,12 @@ function MatchSummaryView({
           </div>
           <div className="divide-y overflow-hidden rounded-md border">
             <ScoreRow
-              name={playerA.name}
+              name={playerAName}
               score={summary.final_score.a}
               winner={aWon}
             />
             <ScoreRow
-              name={playerB.name}
+              name={playerBName}
               score={summary.final_score.b}
               winner={!aWon}
             />
@@ -1171,19 +1134,21 @@ function MatchSummaryView({
           <WarningAlert warnings={summary.data_warnings} />
         )}
 
-        <Button
-          variant="outline"
-          className="w-full"
-          onClick={onRerun}
-          disabled={rerunDisabled}
-        >
-          {rerunDisabled ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <RotateCcw className="h-4 w-4" />
-          )}
-          Re-run
-        </Button>
+        {onRerun && (
+          <Button
+            variant="outline"
+            className="w-full"
+            onClick={onRerun}
+            disabled={rerunDisabled}
+          >
+            {rerunDisabled ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RotateCcw className="h-4 w-4" />
+            )}
+            Re-run
+          </Button>
+        )}
       </CardContent>
     </Card>
   )
@@ -1419,7 +1384,8 @@ function ZoneChip({
   )
 }
 
-function PlayByPlayView({ playByPlay }: { playByPlay: PlayByPlay[] }) {
+// Exported for reuse by the GOAT Bracket series drill-down.
+export function PlayByPlayView({ playByPlay }: { playByPlay: PlayByPlay[] }) {
   // Reveal possessions one at a time. A new result (new array reference) resets
   // the reveal so each simulation animates from the beginning (AC-ISO-003.4).
   const [visibleCount, setVisibleCount] = useState(0)
