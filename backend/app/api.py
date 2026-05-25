@@ -24,6 +24,7 @@ from .bracket import (
     BracketOrchestrator,
     BracketState,
     BracketValidationError,
+    default_bracket_config,
 )
 
 app = FastAPI()
@@ -581,6 +582,21 @@ async def create_bracket(config: BracketConfig):
     except BracketValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"bracket_id": state.bracket_id, "bracket_state": state}
+
+
+def _resolve_player_id_by_name(name: str) -> int | None:
+    # Exact, case-insensitive match against the in-process static player index
+    # (no NBA Stats call) used to back the curated default brackets.
+    matches = players.find_players_by_full_name(f"^{re.escape(name)}$")
+    return matches[0]["id"] if matches else None
+
+
+@app.get("/bracket/default/{size}", tags=["bracket"], response_model=BracketConfig)
+async def get_default_bracket(size: int):
+    try:
+        return default_bracket_config(size, _resolve_player_id_by_name)
+    except BracketValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/bracket/{bracket_id}", tags=["bracket"], response_model=BracketState)

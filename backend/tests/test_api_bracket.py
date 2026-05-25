@@ -74,5 +74,37 @@ class BracketEndpointTest(unittest.TestCase):
         self.assertEqual(fetched["status"], "COMPLETE")
 
 
+class DefaultBracketEndpointTest(unittest.TestCase):
+    def setUp(self):
+        self.client = TestClient(api.app)
+
+    def test_default_returns_config_with_correct_count_and_seeds(self):
+        for size in (4, 8, 16):
+            response = self.client.get(f"/bracket/default/{size}")
+            self.assertEqual(response.status_code, 200, size)
+            body = response.json()
+            self.assertEqual(body["bracket_size"], size)
+            self.assertEqual(len(body["participants"]), size)
+            seeds = [p["seed"] for p in body["participants"]]
+            self.assertEqual(seeds, list(range(1, size + 1)))
+            self.assertTrue(all(p["player_id"] > 0 for p in body["participants"]))
+
+    def test_default_seed_order_is_stable_prefix(self):
+        four = self.client.get("/bracket/default/4").json()["participants"]
+        sixteen = self.client.get("/bracket/default/16").json()["participants"]
+        self.assertEqual(
+            [p["player_id"] for p in four],
+            [p["player_id"] for p in sixteen[:4]],
+        )
+
+    def test_default_rejects_unsupported_size(self):
+        self.assertEqual(self.client.get("/bracket/default/6").status_code, 400)
+
+    def test_default_config_is_usable_to_create_a_bracket(self):
+        config = self.client.get("/bracket/default/8").json()
+        response = self.client.post("/bracket", json=config)
+        self.assertEqual(response.status_code, 200)
+
+
 if __name__ == "__main__":
     unittest.main()

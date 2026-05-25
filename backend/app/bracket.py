@@ -96,6 +96,71 @@ class _BracketSession:
     possession_mode: PossessionMode
 
 
+# Curated all-time greats and their peak seasons, in seed order (ADR-003: index
+# 0 is seed 1). Default brackets of size 4 and 8 are the top-N prefix of this
+# list, so a player's seed stays consistent across every default size.
+CURATED_GREATS: list[tuple[str, str]] = [
+    ("Michael Jordan", "1995-96"),
+    ("LeBron James", "2012-13"),
+    ("Kareem Abdul-Jabbar", "1971-72"),
+    ("Magic Johnson", "1986-87"),
+    ("Tim Duncan", "2002-03"),
+    ("Larry Bird", "1985-86"),
+    ("Wilt Chamberlain", "1966-67"),
+    ("Shaquille O'Neal", "1999-00"),
+    ("Kobe Bryant", "2005-06"),
+    ("Bill Russell", "1961-62"),
+    ("Hakeem Olajuwon", "1993-94"),
+    ("Stephen Curry", "2015-16"),
+    ("Kevin Durant", "2013-14"),
+    ("Oscar Robertson", "1963-64"),
+    ("Dirk Nowitzki", "2006-07"),
+    ("Giannis Antetokounmpo", "2019-20"),
+]
+
+SUPPORTED_BRACKET_SIZES = (4, 8, 16)
+
+# Resolves a curated player's full name to its nba_api player_id. Injected so
+# the static-player lookup stays in api.py and this module stays import-light.
+PlayerIdResolver = Callable[[str], int | None]
+
+
+def default_bracket_config(
+    size: int,
+    resolve_player_id: PlayerIdResolver,
+    series_format: SeriesFormat = 7,
+) -> BracketConfig:
+    """Build a pre-configured BracketConfig of curated greats for `size`.
+
+    Raises BracketValidationError for unsupported sizes (AC-GB-001.4 covers the
+    happy path; an out-of-range size is a client error surfaced as 400).
+    """
+    if size not in SUPPORTED_BRACKET_SIZES:
+        raise BracketValidationError(
+            f"Unsupported bracket size {size}; expected one of "
+            f"{', '.join(str(s) for s in SUPPORTED_BRACKET_SIZES)}."
+        )
+
+    participants: list[BracketParticipant] = []
+    for index, (name, season_id) in enumerate(CURATED_GREATS[:size]):
+        player_id = resolve_player_id(name)
+        if player_id is None:
+            raise BracketValidationError(
+                f"Could not resolve curated player {name!r} to a player_id."
+            )
+        participants.append(
+            BracketParticipant(
+                player_id=player_id, season_id=season_id, seed=index + 1
+            )
+        )
+
+    return BracketConfig(
+        participants=participants,
+        bracket_size=size,
+        series_format=series_format,
+    )
+
+
 def standard_seed_order(bracket_size: int) -> list[int]:
     """Return the first-round seed slot order for a single-elimination bracket.
 
