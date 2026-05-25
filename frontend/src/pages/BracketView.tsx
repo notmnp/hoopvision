@@ -364,8 +364,9 @@ function ParticipantRow({
   )
 }
 
-// Plain <img> (not the Radix Avatar) so WO-33's exporter can add crossOrigin and
-// html2canvas can read the NBA CDN pixels without tainting the canvas.
+// Plain <img> (not the Radix Avatar) with crossOrigin="anonymous" so the
+// BracketExporter's html2canvas pass can read the NBA CDN pixels without
+// tainting the canvas (ADR-006).
 function Headshot({
   playerId,
   className,
@@ -377,6 +378,7 @@ function Headshot({
     <img
       src={headshotUrl(playerId)}
       alt=""
+      crossOrigin="anonymous"
       loading="eager"
       onError={(event) => {
         event.currentTarget.style.visibility = "hidden"
