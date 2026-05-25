@@ -369,7 +369,7 @@ function PlayerSelectionController() {
           }
         />
         <div className="hidden h-full items-center justify-center lg:flex">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full border bg-muted text-sm font-semibold text-muted-foreground">
+          <div className="-mt-4 flex h-12 w-12 items-center justify-center rounded-full border bg-muted text-sm font-semibold text-muted-foreground">
             VS
           </div>
         </div>
@@ -610,7 +610,7 @@ function PlayerSlot({
                           onError={(event) => {
                             event.currentTarget.style.display = "none"
                           }}
-                          className="h-3.5 w-3.5 object-contain"
+                          className="h-4 w-4 object-contain"
                         />
                       )}
                       {seasonTeam ?? profile.team}

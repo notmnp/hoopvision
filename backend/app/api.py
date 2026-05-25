@@ -480,10 +480,26 @@ async def get_player_season(player_id: int, season_id: str):
     return stats
 
 
+# The live CDN (cdn.nba.com) is fronted by Akamai, which now rejects
+# nba_api's default headers with a 403. Supplying browser-like headers with
+# an nba.com Referer/Origin gets the request through.
+NBA_LIVE_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.nba.com/",
+    "Origin": "https://www.nba.com",
+    "Connection": "keep-alive",
+}
+
+
 @app.get("/scoreboard", tags=["nba"])
 async def get_today_scoreboard():
     try:
-        games = scoreboard.ScoreBoard()
+        games = scoreboard.ScoreBoard(headers=NBA_LIVE_HEADERS)
         return games.get_dict()
     except Exception as e:
         raise HTTPException(
