@@ -26,6 +26,7 @@ from .bracket import (
     BracketValidationError,
     default_bracket_config,
 )
+from .shotchart import shot_chart_service
 
 app = FastAPI()
 
@@ -103,6 +104,20 @@ class BulkSimulationResult(BaseModel):
     total_simulations: int
     player_a_win_pct: float
     player_b_win_pct: float
+
+
+class ShotZoneResponse(BaseModel):
+    zone_label: str
+    zone_area: str
+    attempts: int
+    made: int
+    fg_pct: float
+
+
+class ShotChartResponse(BaseModel):
+    available: bool
+    zones: list[ShotZoneResponse]
+    data_warnings: list[str]
 
 
 class PlayerSearchSuggestion(BaseModel):
@@ -485,6 +500,23 @@ async def get_player_season(player_id: int, season_id: str):
             detail=f"No regular-season stats found for season {season_id}",
         )
     return stats
+
+
+@app.get(
+    "/shotchart/{player_id}/{season}",
+    tags=["nba"],
+    response_model=ShotChartResponse,
+)
+async def get_shot_chart(player_id: int, season: str):
+    # Pre-tracking-era seasons resolve to available=false with a warning (a 200
+    # response), so only an actual upstream failure is surfaced as an error.
+    try:
+        return shot_chart_service.get_shot_chart(player_id, season).to_dict()
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to load shot chart: {str(e)}",
+        )
 
 
 # The live CDN (cdn.nba.com) is fronted by Akamai, which now rejects
