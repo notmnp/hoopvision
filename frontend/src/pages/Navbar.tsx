@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils"
 const NAV_ITEMS = [
   { to: "/live", label: "Live Scores" },
   { to: "/simulate", label: "Simulator" },
+  { to: "/bracket", label: "GOAT Bracket" },
   { to: "/teams", label: "Teams" },
   { to: "/predictions", label: "Predictions" },
 ]
