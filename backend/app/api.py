@@ -612,7 +612,7 @@ async def get_bracket(bracket_id: str):
 )
 async def run_bracket_round(bracket_id: str):
     try:
-        return bracket_orchestrator.run_round(bracket_id)
+        return await bracket_orchestrator.run_round(bracket_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="Bracket not found")
     except Exception as e:
@@ -626,7 +626,7 @@ async def run_bracket_round(bracket_id: str):
 )
 async def run_bracket_all(bracket_id: str):
     try:
-        return bracket_orchestrator.run_all(bracket_id)
+        return await bracket_orchestrator.run_all(bracket_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="Bracket not found")
     except Exception as e:

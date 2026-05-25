@@ -1,3 +1,6 @@
+import asyncio
+import threading
+import time
 import unittest
 
 from backend.app.bracket import (
@@ -92,7 +95,7 @@ class RunRoundTest(unittest.TestCase):
     def test_run_round_resolves_only_current_round(self):
         orch = make_orchestrator()
         state = orch.create_bracket(make_config(8))
-        state = orch.run_round(state.bracket_id)
+        state = asyncio.run(orch.run_round(state.bracket_id))
         self.assertTrue(all(m.winner for m in state.rounds[0].matchups))
         self.assertTrue(all(m.winner is None for m in state.rounds[1].matchups))
         self.assertEqual(state.status, "IN_PROGRESS")
@@ -100,7 +103,7 @@ class RunRoundTest(unittest.TestCase):
     def test_winners_advance_to_next_round(self):
         orch = make_orchestrator()
         state = orch.create_bracket(make_config(8))
-        orch.run_round(state.bracket_id)
+        asyncio.run(orch.run_round(state.bracket_id))
         state = orch.get_state(state.bracket_id)
         second_round = state.rounds[1].matchups
         self.assertTrue(all(m.player_a and m.player_b for m in second_round))
@@ -108,7 +111,7 @@ class RunRoundTest(unittest.TestCase):
     def test_series_respects_best_of_format(self):
         orch = make_orchestrator()
         state = orch.create_bracket(make_config(4, series_format=7))
-        state = orch.run_round(state.bracket_id)
+        state = asyncio.run(orch.run_round(state.bracket_id))
         # Deterministic winner sweeps 4-0 in a best-of-7.
         matchup = state.rounds[0].matchups[0]
         self.assertEqual(matchup.series_wins.a + matchup.series_wins.b, 4)
@@ -117,7 +120,7 @@ class RunRoundTest(unittest.TestCase):
     def test_best_of_one_plays_single_game(self):
         orch = make_orchestrator()
         state = orch.create_bracket(make_config(4, series_format=1))
-        state = orch.run_round(state.bracket_id)
+        state = asyncio.run(orch.run_round(state.bracket_id))
         self.assertEqual(len(state.rounds[0].matchups[0].games), 1)
 
 
@@ -125,7 +128,7 @@ class RunAllTest(unittest.TestCase):
     def test_run_all_completes_and_crowns_top_seed(self):
         orch = make_orchestrator()
         state = orch.create_bracket(make_config(16, series_format=7))
-        state = orch.run_all(state.bracket_id)
+        state = asyncio.run(orch.run_all(state.bracket_id))
         self.assertEqual(state.status, "COMPLETE")
         self.assertIsNotNone(state.champion)
         # The lowest player_id (seed 1) wins every series by construction.
@@ -134,6 +137,43 @@ class RunAllTest(unittest.TestCase):
     def test_missing_bracket_raises_keyerror(self):
         with self.assertRaises(KeyError):
             make_orchestrator().get_state("does-not-exist")
+
+
+class ConcurrencyProbe:
+    """Records peak simultaneous in-flight games to prove parallel dispatch."""
+
+    def __init__(self):
+        self.active = 0
+        self.max_active = 0
+        self.lock = threading.Lock()
+
+    def __call__(self, player_a_id, player_b_id, season_a_id, season_b_id, mode):
+        with self.lock:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+        # Hold the slot briefly so concurrent matchups overlap in time.
+        time.sleep(0.05)
+        with self.lock:
+            self.active -= 1
+        a_wins = player_a_id < player_b_id
+        return {
+            "play_by_play": [],
+            "summary": {
+                "final_score": {"a": 21, "b": 7} if a_wins else {"a": 7, "b": 21}
+            },
+        }
+
+
+class ParallelRoundTest(unittest.TestCase):
+    def test_matchups_in_a_round_run_concurrently(self):
+        # ADR-005: the four first-round matchups of an 8-player bracket should be
+        # dispatched concurrently rather than serialized.
+        probe = ConcurrencyProbe()
+        orch = BracketOrchestrator(engine=None, game_simulator=probe)
+        state = orch.create_bracket(make_config(8, series_format=1))
+        asyncio.run(orch.run_round(state.bracket_id))
+        self.assertTrue(all(m.winner for m in state.rounds[0].matchups))
+        self.assertGreater(probe.max_active, 1)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ testable without standing up FastAPI, mirroring how `simulation.py` and
 `matchup_data.py` own their own contracts.
 """
 
+import asyncio
 import uuid
 from dataclasses import dataclass
 from math import log2
@@ -266,7 +267,7 @@ class BracketOrchestrator:
     def get_state(self, bracket_id: str) -> BracketState:
         return self._session(bracket_id).state
 
-    def run_round(self, bracket_id: str) -> BracketState:
+    async def run_round(self, bracket_id: str) -> BracketState:
         session = self._session(bracket_id)
         state = session.state
         if state.status == "COMPLETE":
@@ -276,17 +277,33 @@ class BracketOrchestrator:
         if target_round is None:
             return state
 
-        for matchup in target_round.matchups:
-            if self._is_playable(matchup):
-                self._simulate_series(
-                    matchup, state.series_format, session.possession_mode
+        # ADR-005: matchups in a round are independent, so dispatch them
+        # concurrently. Each series' synchronous game loop is offloaded to the
+        # event loop's default thread pool executor via run_in_executor, so the
+        # round's wall-clock time is bounded by the slowest single series rather
+        # than the sum of all of them, while SimulationEngine stays synchronous.
+        playable = [
+            matchup for matchup in target_round.matchups if self._is_playable(matchup)
+        ]
+        loop = asyncio.get_running_loop()
+        await asyncio.gather(
+            *(
+                loop.run_in_executor(
+                    None,
+                    self._simulate_series,
+                    matchup,
+                    state.series_format,
+                    session.possession_mode,
                 )
+                for matchup in playable
+            )
+        )
 
         self._advance_round(state, target_round)
         state.status = self._compute_status(state)
         return state
 
-    def run_all(self, bracket_id: str) -> BracketState:
+    async def run_all(self, bracket_id: str) -> BracketState:
         state = self._session(bracket_id).state
         # Each call resolves exactly one round, so the tournament completes in at
         # most `len(rounds)` iterations; the cap guards against any non-advancing
@@ -294,7 +311,7 @@ class BracketOrchestrator:
         for _ in range(len(state.rounds) + 1):
             if state.status == "COMPLETE":
                 break
-            state = self.run_round(bracket_id)
+            state = await self.run_round(bracket_id)
         return state
 
     def _session(self, bracket_id: str) -> _BracketSession:
