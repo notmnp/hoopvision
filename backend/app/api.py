@@ -19,6 +19,12 @@ from .nba_stats_client import (
 )
 from .player_data import get_player_season_stats, list_player_seasons
 from .simulation import SimulationEngine
+from .bracket import (
+    BracketConfig,
+    BracketOrchestrator,
+    BracketState,
+    BracketValidationError,
+)
 
 app = FastAPI()
 
@@ -552,4 +558,62 @@ async def simulate_bulk(request: BulkSimulationRequest):
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to run bulk simulation: {str(e)}"
+        )
+
+
+# A single orchestrator instance owns the in-process bracket session store
+# (ADR-002). It reuses one SimulationEngine since the engine is stateless beyond
+# its cached profile builder.
+bracket_orchestrator = BracketOrchestrator(
+    engine=SimulationEngine(profile_provider=_get_player_profile_by_id)
+)
+
+
+class CreateBracketResponse(BaseModel):
+    bracket_id: str
+    bracket_state: BracketState
+
+
+@app.post("/bracket", tags=["bracket"], response_model=CreateBracketResponse)
+async def create_bracket(config: BracketConfig):
+    try:
+        state = bracket_orchestrator.create_bracket(config)
+    except BracketValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"bracket_id": state.bracket_id, "bracket_state": state}
+
+
+@app.get("/bracket/{bracket_id}", tags=["bracket"], response_model=BracketState)
+async def get_bracket(bracket_id: str):
+    try:
+        return bracket_orchestrator.get_state(bracket_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Bracket not found")
+
+
+@app.post(
+    "/bracket/{bracket_id}/run-round", tags=["bracket"], response_model=BracketState
+)
+async def run_bracket_round(bracket_id: str):
+    try:
+        return bracket_orchestrator.run_round(bracket_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Bracket not found")
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to simulate round: {str(e)}"
+        )
+
+
+@app.post(
+    "/bracket/{bracket_id}/run-all", tags=["bracket"], response_model=BracketState
+)
+async def run_bracket_all(bracket_id: str):
+    try:
+        return bracket_orchestrator.run_all(bracket_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Bracket not found")
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to simulate bracket: {str(e)}"
         )
