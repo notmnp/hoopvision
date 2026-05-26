@@ -184,7 +184,7 @@ export function BracketTree<M>({
       className="relative flex min-w-max items-stretch justify-center gap-6"
     >
       <svg
-        className="pointer-events-none absolute inset-0 z-0 h-full w-full overflow-visible"
+        className="pointer-events-none absolute inset-0 z-0 h-full w-full overflow-visible text-border"
         width={dims.w}
         height={dims.h}
         aria-hidden
@@ -194,7 +194,7 @@ export function BracketTree<M>({
             key={index}
             d={connector.d}
             fill="none"
-            className="stroke-border"
+            stroke="currentColor"
             strokeWidth={2}
             strokeLinejoin="round"
           />
@@ -206,7 +206,7 @@ export function BracketTree<M>({
           key={column.key}
           className={cn("relative z-10 flex flex-col", columnClassName)}
         >
-          <div className="mb-3 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="mb-3 text-center font-display text-sm font-medium uppercase tracking-wider text-muted-foreground">
             {roundName(column.roundNumber, totalRounds)}
           </div>
           <div className="flex flex-1 flex-col justify-around gap-4">

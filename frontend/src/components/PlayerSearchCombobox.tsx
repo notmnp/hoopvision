@@ -2,6 +2,7 @@ import * as React from "react"
 import { useEffect, useState } from "react"
 import { Loader2 } from "lucide-react"
 
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
   Command,
   CommandGroup,
@@ -20,6 +21,17 @@ import {
   usePlayerSearch,
   usePlayerSuggestions,
 } from "@/hooks/usePlayerSearch"
+
+const HEADSHOT = (id: number) =>
+  `https://cdn.nba.com/headshots/nba/latest/1040x760/${id}.png`
+
+// First + last initials, e.g. "Michael Jordan" → "MJ".
+function initialsOf(name: string) {
+  const parts = name.trim().split(/\s+/)
+  const first = parts[0]?.[0] ?? ""
+  const last = parts.length > 1 ? parts[parts.length - 1][0] : ""
+  return (first + last).toUpperCase()
+}
 
 interface PlayerSearchComboboxProps {
   // The clickable element shown in place of a search box. Clicking it opens the
@@ -97,19 +109,19 @@ export function PlayerSearchCombobox({
             onValueChange={setQuery}
             placeholder="Search player…"
           />
-          <CommandList className="max-h-60">
+          <CommandList className="max-h-60 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {searchLoading || (suggestionsLoading && suggestions.length === 0) ? (
-              <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
+              <div className="flex items-center justify-center gap-2 py-6 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 {searchLoading ? "Loading player…" : "Searching…"}
               </div>
             ) : !trimmed ? (
-              <div className="py-6 text-center text-sm text-muted-foreground">
-                Type a player's name to search.
+              <div className="py-6 text-center font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                Type a player's name to search
               </div>
             ) : suggestions.length === 0 ? (
-              <div className="py-6 text-center text-sm text-muted-foreground">
-                No players found.
+              <div className="py-6 text-center font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                No players found
               </div>
             ) : (
               <CommandGroup>
@@ -118,8 +130,20 @@ export function PlayerSearchCombobox({
                     key={suggestion.id}
                     value={`${suggestion.full_name}__${suggestion.id}`}
                     onSelect={() => handleSelect(suggestion)}
+                    className="gap-3 data-[selected=true]:bg-amber-500/10 data-[selected=true]:text-amber-600 dark:data-[selected=true]:text-amber-400"
                   >
-                    {suggestion.full_name}
+                    <Avatar className="size-8 shrink-0 rounded-lg ring-1 ring-border">
+                      <AvatarImage
+                        src={HEADSHOT(suggestion.id)}
+                        className="object-cover object-top"
+                      />
+                      <AvatarFallback className="rounded-lg font-mono text-[0.6rem] font-medium">
+                        {initialsOf(suggestion.full_name)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span className="truncate">
+                      {suggestion.full_name}
+                    </span>
                   </CommandItem>
                 ))}
               </CommandGroup>

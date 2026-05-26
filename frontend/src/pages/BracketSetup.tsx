@@ -200,7 +200,9 @@ export default function BracketWorkspace() {
     return (
       <CenteredMessage>
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">Loading bracket…</p>
+        <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+          Loading bracket…
+        </p>
       </CenteredMessage>
     )
   }
@@ -210,7 +212,12 @@ export default function BracketWorkspace() {
       <CenteredMessage>
         <AlertTriangle className="h-6 w-6 text-destructive" />
         <p className="text-sm text-muted-foreground">{error}</p>
-        <Button variant="outline" size="sm" onClick={startNew}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={startNew}
+          className="font-mono uppercase tracking-wider"
+        >
           <Plus className="h-4 w-4" />
           Start a new bracket
         </Button>
@@ -222,33 +229,54 @@ export default function BracketWorkspace() {
   const complete = bracketState?.status === "COMPLETE"
 
   return (
-    <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-screen-xl flex-col px-4 py-8 md:px-6">
+    <div className="relative mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-screen-xl flex-col px-4 py-8 md:px-6">
+      {/* Court geometry + dot grid behind the page header only */}
+      <svg
+        aria-hidden
+        viewBox="0 0 1200 600"
+        preserveAspectRatio="xMidYMin slice"
+        className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[320px] w-full text-foreground/[0.05] dark:text-foreground/[0.07]"
+        fill="none"
+      >
+        <circle cx="600" cy="-40" r="210" stroke="currentColor" strokeWidth="2" />
+        <path
+          d="M 120 -20 A 480 480 0 0 0 1080 -20"
+          stroke="oklch(0.646 0.222 41 / 0.12)"
+          strokeWidth="2"
+        />
+        <line x1="0" y1="1" x2="1200" y2="1" stroke="currentColor" strokeWidth="2" />
+      </svg>
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[320px] bg-[radial-gradient(circle,_oklch(0.6_0_0_/_0.12)_1px,_transparent_1px)] [background-size:26px_26px] [mask-image:linear-gradient(to_bottom,black,transparent_70%)]"
+      />
+
       <div className="mb-6 flex flex-col gap-4 border-b pb-6 md:flex-row md:items-end md:justify-between">
-        <div className="space-y-1">
+        <div className="flex flex-col items-start gap-2 animate-in fade-in slide-in-from-bottom-4 duration-700 [animation-fill-mode:both] motion-reduce:animate-none">
           {running && bracketState ? (
             <>
-              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              <div className="flex items-center gap-2 font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
                 <span>GOAT Bracket</span>
-                <span>/</span>
-                <span>
+                <span className="text-amber-500/60">◆</span>
+                <span className="tabular-nums">
                   {bracketState.bracket_size}-player · Bo
                   {bracketState.series_format}
                 </span>
               </div>
-              <h1 className="text-3xl font-bold tracking-tight">
+              <h1 className="font-display text-3xl font-black uppercase tracking-tight sm:text-4xl">
                 {complete ? "Champion crowned" : "Tournament bracket"}
               </h1>
               <StatusBadge status={bracketState.status} />
             </>
           ) : (
             <>
-              <div className="text-sm font-medium text-muted-foreground">
+              <span className="font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
                 GOAT Bracket
-              </div>
-              <h1 className="text-3xl font-bold tracking-tight">
+              </span>
+              <h1 className="font-display text-3xl font-black uppercase tracking-tight sm:text-4xl">
                 Build your tournament
               </h1>
-              <p className="text-sm text-muted-foreground">
+              <p className="max-w-md text-pretty text-sm leading-relaxed text-muted-foreground">
                 Fill every slot in the bracket, then run each matchup as a
                 best-of series through the IsoLab engine until one champion
                 remains.
@@ -259,13 +287,18 @@ export default function BracketWorkspace() {
 
         {running ? (
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" onClick={startNew}>
+            <Button
+              variant="outline"
+              onClick={startNew}
+              className="font-mono uppercase tracking-wider"
+            >
               <Plus className="h-4 w-4" />
               New bracket
             </Button>
             <Button
               onClick={() => runStep("run-round")}
               disabled={complete || simulating}
+              className="font-mono uppercase tracking-wider"
             >
               {simulating ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -278,6 +311,7 @@ export default function BracketWorkspace() {
               variant="secondary"
               onClick={() => runStep("run-all")}
               disabled={complete || simulating}
+              className="font-mono uppercase tracking-wider"
             >
               {simulating ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -286,7 +320,12 @@ export default function BracketWorkspace() {
               )}
               Simulate All
             </Button>
-            <Button variant="outline" onClick={handleExport} disabled={exporting}>
+            <Button
+              variant="outline"
+              onClick={handleExport}
+              disabled={exporting}
+              className="font-mono uppercase tracking-wider"
+            >
               {exporting ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
@@ -302,7 +341,7 @@ export default function BracketWorkspace() {
                 variant="secondary"
                 onClick={loadPreconfigured}
                 disabled={busy}
-                className="sm:w-auto"
+                className="font-mono uppercase tracking-wider sm:w-auto"
               >
                 {loadingDefault ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -319,7 +358,7 @@ export default function BracketWorkspace() {
                     <Button
                       onClick={simulate}
                       disabled={!allFilled || busy}
-                      className="w-full sm:w-auto"
+                      className="w-full font-mono uppercase tracking-wider sm:w-auto"
                     >
                       {submitting ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -331,8 +370,8 @@ export default function BracketWorkspace() {
                   </span>
                 </TooltipTrigger>
                 {!allFilled && (
-                  <TooltipContent>
-                    {size - filledCount} more{" "}
+                  <TooltipContent className="font-mono text-xs uppercase tracking-wider">
+                    <span className="tabular-nums">{size - filledCount}</span> more{" "}
                     {size - filledCount === 1 ? "player" : "players"} to set
                     before you can simulate.
                   </TooltipContent>
@@ -346,7 +385,9 @@ export default function BracketWorkspace() {
       {error && (
         <Alert variant="destructive" className="mb-5">
           <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>{running ? "Simulation failed" : "Couldn't continue"}</AlertTitle>
+          <AlertTitle className="font-mono uppercase tracking-wider">
+            {running ? "Simulation failed" : "Couldn't continue"}
+          </AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
@@ -404,7 +445,7 @@ function SegmentedControl({
 }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
         {label}
       </span>
       <div className="inline-flex rounded-md border bg-muted/40 p-0.5">
@@ -418,11 +459,11 @@ function SegmentedControl({
               aria-pressed={active}
               onClick={() => onChange(option.value)}
               className={cn(
-                "min-w-[3rem] rounded-[5px] px-3 py-1.5 text-sm font-medium transition-colors",
+                "min-w-[3rem] rounded-[5px] px-3 py-1.5 font-mono text-sm font-medium uppercase tracking-wider tabular-nums transition-colors",
                 "disabled:cursor-not-allowed disabled:opacity-50",
                 active
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
+                  ? "border border-amber-500/40 bg-amber-500/10 text-amber-600 shadow-sm shadow-amber-500/10 dark:text-amber-400"
+                  : "border border-transparent text-muted-foreground hover:text-foreground"
               )}
             >
               {option.label}
@@ -435,14 +476,22 @@ function SegmentedControl({
 }
 
 function StatusBadge({ status }: { status: BracketState["status"] }) {
-  const label =
-    status === "COMPLETE"
-      ? "Complete"
-      : status === "IN_PROGRESS"
-        ? "In progress"
-        : "Ready to simulate"
+  const complete = status === "COMPLETE"
+  const label = complete
+    ? "Complete"
+    : status === "IN_PROGRESS"
+      ? "In progress"
+      : "Ready to simulate"
   return (
-    <Badge variant={status === "COMPLETE" ? "default" : "secondary"}>
+    <Badge
+      variant={complete ? "default" : "secondary"}
+      className={cn(
+        "font-mono text-[0.65rem] uppercase tracking-wider",
+        complete &&
+          "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+      )}
+    >
+      {complete && <span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-amber-500" />}
       {label}
     </Badge>
   )

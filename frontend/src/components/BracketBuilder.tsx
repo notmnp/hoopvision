@@ -78,11 +78,12 @@ export function BracketBuilder({
           const indexA = (matchup.seed_a as number) - 1
           const indexB = (matchup.seed_b as number) - 1
           return (
-            <div className="rounded-lg border bg-card shadow-sm">
+            <div className="overflow-hidden rounded-lg border bg-card shadow-sm">
               <SlotPicker
                 slot={slots[indexA]}
                 onChange={(next) => onUpdateSlot(indexA, next)}
                 disabled={disabled}
+                seed={matchup.seed_a as number}
                 ariaLabel={`Pick player for seed ${matchup.seed_a}`}
               />
               <div className="border-t" />
@@ -90,6 +91,7 @@ export function BracketBuilder({
                 slot={slots[indexB]}
                 onChange={(next) => onUpdateSlot(indexB, next)}
                 disabled={disabled}
+                seed={matchup.seed_b as number}
                 ariaLabel={`Pick player for seed ${matchup.seed_b}`}
               />
             </div>
@@ -113,9 +115,11 @@ function PlaceholderMatchup() {
 
 function PlaceholderRow() {
   return (
-    <div className="flex items-center gap-2.5 p-2.5 text-sm text-muted-foreground">
+    <div className="flex items-center gap-2.5 p-2.5">
       <div className="h-9 w-9 shrink-0 rounded-md border border-dashed bg-muted/40" />
-      <span className="italic">Awaiting winner</span>
+      <span className="font-mono text-[0.65rem] uppercase tracking-wider text-muted-foreground">
+        Awaiting winner
+      </span>
     </div>
   )
 }
@@ -128,11 +132,13 @@ function SlotPicker({
   slot,
   onChange,
   disabled,
+  seed,
   ariaLabel,
 }: {
   slot: BracketSlot
   onChange: (slot: BracketSlot) => void
   disabled?: boolean
+  seed: number
   ariaLabel: string
 }) {
   const { seasons, loading: seasonsLoading, loadSeasons } = usePlayerSeasons()
@@ -168,12 +174,15 @@ function SlotPicker({
   if (slot.player_id !== null) {
     return (
       <div className="flex items-center gap-2.5 p-2.5">
+        <span className="w-4 shrink-0 text-center font-mono text-[0.65rem] font-medium uppercase tracking-wider tabular-nums text-amber-600 dark:text-amber-400">
+          {seed}
+        </span>
         {/* Plain <img> (not the Radix Avatar) with crossOrigin="anonymous" so it
             loads via our CORS proxy and stays consistent with the bracket board
             (ADR-006); Radix Avatar.Image's load detection fails for these. The
             initials sit underneath and show through if the photo errors. */}
-        <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded-md border bg-muted">
-          <span className="flex h-full w-full items-center justify-center text-[10px] font-semibold text-muted-foreground">
+        <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded-md border bg-muted ring-2 ring-amber-500">
+          <span className="flex h-full w-full items-center justify-center font-mono text-[10px] font-medium uppercase text-muted-foreground">
             {slot.name ? getInitials(slot.name) : "?"}
           </span>
           <img
@@ -188,7 +197,7 @@ function SlotPicker({
           />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold">
+          <div className="truncate font-display text-base font-bold uppercase leading-tight tracking-tight text-amber-600 dark:text-amber-400">
             {slot.name ?? `Player #${slot.player_id}`}
           </div>
           <Select
@@ -198,7 +207,7 @@ function SlotPicker({
           >
             <SelectTrigger
               aria-label={`Select season — ${slot.name ?? "player"}`}
-              className="mt-0 h-5! gap-1.5 border-none bg-transparent px-0 py-0! text-xs text-muted-foreground shadow-none focus:ring-0"
+              className="mt-0 h-5! gap-1.5 border-none bg-transparent px-0 py-0! font-mono text-[0.65rem] uppercase tracking-wider tabular-nums text-muted-foreground shadow-none focus:ring-0"
             >
               <CalendarDays className="h-3.5 w-3.5" />
               <SelectValue
@@ -217,7 +226,7 @@ function SlotPicker({
         <Button
           variant="ghost"
           size="icon"
-          className="h-7 w-7 shrink-0 text-muted-foreground"
+          className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
           onClick={clearSlot}
           disabled={disabled}
           aria-label="Clear player"
@@ -237,12 +246,17 @@ function SlotPicker({
           type="button"
           disabled={disabled}
           aria-label={ariaLabel}
-          className="flex w-full items-center gap-2.5 p-2.5 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex w-full items-center gap-2.5 border border-dashed border-transparent bg-muted/20 p-2.5 text-left transition-colors hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-50"
         >
+          <span className="w-4 shrink-0 text-center font-mono text-[0.65rem] font-medium uppercase tracking-wider tabular-nums text-muted-foreground">
+            {seed}
+          </span>
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-dashed bg-muted/40">
             <Plus className="h-4 w-4 opacity-60" />
           </span>
-          <span>Select player</span>
+          <span className="font-mono text-[0.65rem] uppercase tracking-wider text-muted-foreground">
+            Pick a player
+          </span>
         </button>
       }
     />

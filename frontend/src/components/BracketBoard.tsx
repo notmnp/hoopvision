@@ -46,7 +46,10 @@ export function BracketBoard({
     <>
       {complete && state.champion && <ChampionBanner champion={state.champion} />}
 
-      <div ref={treeRef} className="overflow-x-auto pb-4">
+      <div
+        ref={treeRef as React.RefObject<HTMLDivElement>}
+        className="overflow-x-auto pb-4"
+      >
         <BracketTree
           rounds={state.rounds}
           renderMatchup={(matchup) => (
@@ -68,7 +71,7 @@ export function BracketBoard({
 
 function ChampionBanner({ champion }: { champion: BracketParticipant }) {
   return (
-    <div className="relative mb-6 flex items-center gap-5 overflow-hidden rounded-xl border border-amber-500/50 bg-gradient-to-r from-amber-500/20 via-amber-500/10 to-transparent p-5 shadow-lg shadow-amber-500/10">
+    <div className="relative mb-6 flex items-center gap-5 overflow-hidden rounded-2xl border border-amber-500/50 bg-gradient-to-r from-amber-500/20 via-amber-500/10 to-transparent p-5 shadow-lg shadow-amber-500/10">
       {/* Soft radial glow behind the champion for a celebratory feel. */}
       <div className="pointer-events-none absolute -left-10 top-1/2 h-48 w-48 -translate-y-1/2 rounded-full bg-amber-400/20 blur-3xl" />
       <div className="relative shrink-0">
@@ -80,14 +83,14 @@ function ChampionBanner({ champion }: { champion: BracketParticipant }) {
         <Crown className="absolute -top-4 left-1/2 h-8 w-8 -translate-x-1/2 fill-amber-400 text-amber-500 drop-shadow" />
       </div>
       <div className="relative">
-        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-amber-600 dark:text-amber-400">
+        <div className="flex items-center gap-2 font-mono text-xs uppercase tracking-[0.2em] text-amber-600 dark:text-amber-400">
           <Trophy className="h-4 w-4" />
           Tournament champion
         </div>
-        <div className="mt-0.5 text-3xl font-bold tracking-tight">
+        <div className="mt-0.5 font-display text-4xl font-black uppercase leading-none tracking-tight">
           {participantLabel(champion)}
         </div>
-        <div className="text-sm text-muted-foreground">
+        <div className="mt-1 font-mono text-xs uppercase tracking-wider text-muted-foreground">
           {champion.season_id} season
         </div>
       </div>
@@ -107,7 +110,7 @@ function MatchupCard({
   const bWon = decided && matchup.winner?.seed === matchup.seed_b
 
   return (
-    <div className="rounded-lg border bg-card shadow-sm">
+    <div className="rounded-2xl border bg-card shadow-sm">
       <ParticipantRow
         participant={matchup.player_a}
         wins={matchup.series_wins.a}
@@ -126,7 +129,7 @@ function MatchupCard({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 w-full text-xs text-muted-foreground"
+            className="h-7 w-full font-mono text-xs uppercase tracking-wider text-muted-foreground"
             onClick={onViewSeries}
           >
             <ListOrdered className="h-3.5 w-3.5" />
@@ -153,8 +156,10 @@ function ParticipantRow({
   if (!participant) {
     return (
       <div className="flex items-center gap-3 p-3 text-sm text-muted-foreground">
-        <div className="h-9 w-9 shrink-0 rounded-md border border-dashed bg-muted/40" />
-        <span className="italic">Awaiting winner</span>
+        <div className="h-9 w-9 shrink-0 rounded-lg border border-dashed bg-muted/40" />
+        <span className="font-mono text-xs uppercase tracking-wider">
+          Awaiting winner
+        </span>
       </div>
     )
   }
@@ -165,32 +170,39 @@ function ParticipantRow({
         "relative flex items-center gap-3 p-3 transition-all",
         // A left accent bar plus a tinted background marks the series winner.
         isWinner &&
-          "bg-emerald-500/10 before:absolute before:inset-y-0 before:left-0 before:w-1 before:bg-emerald-500",
+          "bg-amber-500/10 before:absolute before:inset-y-0 before:left-0 before:w-1 before:bg-amber-500",
         isEliminated && "opacity-40"
       )}
     >
       <Headshot
         playerId={participant.player_id}
         className={cn(
-          "h-9 w-9 rounded-md",
-          isWinner && "ring-2 ring-emerald-500/60"
+          "h-9 w-9 rounded-lg",
+          isWinner && "ring-2 ring-amber-500"
         )}
       />
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5 text-sm font-medium">
-          <span className="truncate">{participantLabel(participant)}</span>
+        <div className="flex items-center gap-1.5">
+          <span
+            className={cn(
+              "truncate font-display text-base font-bold uppercase leading-none tracking-tight",
+              isWinner && "text-amber-600 dark:text-amber-400"
+            )}
+          >
+            {participantLabel(participant)}
+          </span>
           {isWinner && (
-            <Trophy className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <Trophy className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
           )}
         </div>
-        <div className="text-xs text-muted-foreground">
+        <div className="mt-0.5 font-mono text-xs uppercase tracking-wider text-muted-foreground">
           {participant.season_id}
         </div>
       </div>
       <span
         className={cn(
-          "text-lg font-bold tabular-nums",
-          isWinner ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
+          "font-mono text-lg font-bold tabular-nums",
+          isWinner ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
         )}
       >
         {wins}
@@ -262,7 +274,7 @@ function SeriesSheet({
         {game && (
           <div className="space-y-4">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
                 Game
               </span>
               <Select

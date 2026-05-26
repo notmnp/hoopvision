@@ -22,6 +22,10 @@ export interface TendencyComparisonPanelProps {
   onViewShotChart: (player: PlayerProfile, seasonId: string) => void
 }
 
+// Which side holds the advantage for a given row. `null` means even / not
+// comparable (e.g. missing measurements), so neither side is highlighted.
+type Edge = "a" | "b" | null
+
 export default function TendencyComparisonPanel({
   playerA,
   playerB,
@@ -37,10 +41,10 @@ export default function TendencyComparisonPanel({
   const heightB = heightToInches(playerB.height)
 
   return (
-    <Card className="mt-6 rounded-lg">
+    <Card className="mt-6 rounded-2xl border bg-card">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-          <ArrowLeftRight className="h-4 w-4" />
+        <CardTitle className="flex items-center gap-2 font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
+          <ArrowLeftRight className="h-3.5 w-3.5" />
           Matchup comparison
         </CardTitle>
       </CardHeader>
@@ -53,8 +57,11 @@ export default function TendencyComparisonPanel({
             season={seasonA}
             onViewShotChart={() => onViewShotChart(playerA, seasonA)}
           />
-          <div className="pt-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            vs
+          <div className="flex flex-col items-center self-center">
+            <span className="font-display text-2xl font-black italic leading-none text-muted-foreground/50">
+              VS
+            </span>
+            <span className="mt-1 h-6 w-px bg-border" />
           </div>
           <PlayerHeading
             align="right"
@@ -70,26 +77,40 @@ export default function TendencyComparisonPanel({
             label="Points / game"
             a={statsA.points_per_game.toFixed(1)}
             b={statsB.points_per_game.toFixed(1)}
+            edge={edgeOf(statsA.points_per_game, statsB.points_per_game, "high")}
           />
           <CompareRow
             label="Scoring efficiency (pts / FGA)"
             a={effA.toFixed(2)}
             b={effB.toFixed(2)}
+            edge={edgeOf(effA, effB, "high")}
           />
           <CompareRow
             label="3PT shot rate"
             a={formatPct(statsA.three_point_attempt_rate)}
             b={formatPct(statsB.three_point_attempt_rate)}
+            edge={edgeOf(
+              statsA.three_point_attempt_rate,
+              statsB.three_point_attempt_rate,
+              "high"
+            )}
           />
           <CompareRow
             label="Foul-drawing rate (FTA / FGA)"
             a={formatPct(statsA.free_throw_attempt_rate)}
             b={formatPct(statsB.free_throw_attempt_rate)}
+            edge={edgeOf(
+              statsA.free_throw_attempt_rate,
+              statsB.free_throw_attempt_rate,
+              "high"
+            )}
           />
           <CompareRow
             label="Turnovers / game"
             a={statsA.turnover_per_game.toFixed(1)}
             b={statsB.turnover_per_game.toFixed(1)}
+            // Fewer turnovers is the edge.
+            edge={edgeOf(statsA.turnover_per_game, statsB.turnover_per_game, "low")}
           />
         </Section>
 
@@ -99,22 +120,25 @@ export default function TendencyComparisonPanel({
             label="Height"
             a={playerA.height ?? "N/A"}
             b={playerB.height ?? "N/A"}
+            edge={edgeOf(heightA, heightB, "high")}
           />
           <CompareRow
             label="Weight"
             a={formatWeight(playerA.weight)}
             b={formatWeight(playerB.weight)}
+            edge={edgeOf(weightToNumber(playerA.weight), weightToNumber(playerB.weight), "high")}
           />
           <CompareRow
             label="Wingspan"
             a={formatWingspan(playerA.wingspan)}
             b={formatWingspan(playerB.wingspan)}
+            edge={edgeOf(playerA.wingspan, playerB.wingspan, "high")}
           />
         </Section>
 
         {/* Highlighted differentials */}
         <div>
-          <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="mb-3 flex items-center gap-1.5 font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
             <TrendingUp className="h-3.5 w-3.5" />
             Key differentials
           </div>
@@ -127,11 +151,15 @@ export default function TendencyComparisonPanel({
                   : "N/A"
               }
               detail={heightEdgeLabel(playerA, playerB, heightA, heightB)}
+              edge={
+                heightA !== null && heightB !== null && heightA !== heightB
+              }
             />
             <DifferentialTile
               label="Scoring efficiency"
               value={`${formatSigned(effA - effB)} pts/FGA`}
               detail={edgeLabel(playerA.name, playerB.name, effA - effB)}
+              edge={Math.abs(effA - effB) >= 0.005}
             />
             <DifferentialTile
               label="Turnover rate"
@@ -145,6 +173,11 @@ export default function TendencyComparisonPanel({
                 playerB.name,
                 statsB.turnover_per_game - statsA.turnover_per_game
               )}
+              edge={
+                Math.abs(
+                  statsB.turnover_per_game - statsA.turnover_per_game
+                ) >= 0.005
+              }
             />
           </div>
         </div>
@@ -166,12 +199,16 @@ function PlayerHeading({
 }) {
   return (
     <div className={cn("space-y-1.5", align === "right" && "text-right")}>
-      <div className="truncate font-semibold">{name}</div>
-      <div className="text-xs text-muted-foreground">{season} season</div>
+      <div className="truncate font-display text-lg font-bold uppercase leading-none tracking-tight">
+        {name}
+      </div>
+      <div className="font-mono text-[0.6rem] uppercase tracking-wider text-muted-foreground">
+        {season} season
+      </div>
       <Button
         variant="outline"
         size="sm"
-        className="h-7 text-xs"
+        className="h-7 font-mono text-xs uppercase tracking-wider"
         onClick={onViewShotChart}
       >
         <ScatterChart className="h-3.5 w-3.5" />
@@ -184,10 +221,12 @@ function PlayerHeading({
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div>
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+      <div className="mb-2 font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
         {title}
       </div>
-      <div className="divide-y overflow-hidden rounded-md border">{children}</div>
+      <div className="divide-y overflow-hidden rounded-xl border">
+        {children}
+      </div>
     </div>
   )
 }
@@ -196,16 +235,38 @@ function CompareRow({
   label,
   a,
   b,
+  edge,
 }: {
   label: string
   a: string
   b: string
+  edge: Edge
 }) {
   return (
-    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-3 py-2 text-sm">
-      <span className="text-left font-semibold tabular-nums">{a}</span>
-      <span className="text-center text-xs text-muted-foreground">{label}</span>
-      <span className="text-right font-semibold tabular-nums">{b}</span>
+    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-3 py-2.5 text-sm">
+      <span
+        className={cn(
+          "text-left font-mono font-medium tabular-nums",
+          edge === "a"
+            ? "text-amber-600 dark:text-amber-400"
+            : "text-foreground"
+        )}
+      >
+        {a}
+      </span>
+      <span className="text-center font-mono text-[0.6rem] uppercase tracking-wider text-muted-foreground">
+        {label}
+      </span>
+      <span
+        className={cn(
+          "text-right font-mono font-medium tabular-nums",
+          edge === "b"
+            ? "text-amber-600 dark:text-amber-400"
+            : "text-foreground"
+        )}
+      >
+        {b}
+      </span>
     </div>
   )
 }
@@ -214,20 +275,44 @@ function DifferentialTile({
   label,
   value,
   detail,
+  edge,
 }: {
   label: string
   value: string
   detail: string
+  edge: boolean
 }) {
   return (
-    <div className="rounded-md border bg-muted/30 px-3 py-2.5">
-      <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+    <div className="rounded-xl border bg-muted/30 px-3 py-2.5">
+      <div className="font-mono text-[0.6rem] uppercase tracking-wider text-muted-foreground">
         {label}
       </div>
-      <div className="text-lg font-bold tabular-nums">{value}</div>
-      <div className="truncate text-xs text-muted-foreground">{detail}</div>
+      <div
+        className={cn(
+          "font-display text-2xl font-black uppercase leading-none tracking-tight tabular-nums",
+          edge && "text-amber-600 dark:text-amber-400"
+        )}
+      >
+        {value}
+      </div>
+      <div className="mt-1 truncate font-mono text-[0.6rem] uppercase tracking-wider text-muted-foreground">
+        {detail}
+      </div>
     </div>
   )
+}
+
+// Resolves which player holds the edge for a pair of measurements. `direction`
+// declares whether a higher or lower value is the advantage. Returns null when
+// either side is missing or the values are equal.
+function edgeOf(
+  a: number | null,
+  b: number | null,
+  direction: "high" | "low"
+): Edge {
+  if (a === null || b === null || a === b) return null
+  const aWins = direction === "high" ? a > b : a < b
+  return aWins ? "a" : "b"
 }
 
 function scoringEfficiency(stats: PlayerSeasonStats): number {
@@ -240,6 +325,12 @@ function heightToInches(height: string | null): number | null {
   const match = /(\d+)\s*-\s*(\d+)/.exec(height)
   if (!match) return null
   return Number(match[1]) * 12 + Number(match[2])
+}
+
+function weightToNumber(weight: string | null): number | null {
+  if (!weight) return null
+  const parsed = Number.parseFloat(weight)
+  return Number.isNaN(parsed) ? null : parsed
 }
 
 function heightEdgeLabel(

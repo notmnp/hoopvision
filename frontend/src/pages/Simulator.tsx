@@ -1,4 +1,12 @@
-import { CSSProperties, ReactNode, useEffect, useState } from "react"
+import {
+  CSSProperties,
+  Fragment,
+  ReactNode,
+  useEffect,
+  useId,
+  useMemo,
+  useState,
+} from "react"
 import axios from "axios"
 import { API_BASE_URL } from "@/lib/config"
 import {
@@ -30,7 +38,6 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { PlayerSearchCombobox } from "@/components/PlayerSearchCombobox"
-import { Progress } from "@/components/ui/progress"
 import {
   Select,
   SelectContent,
@@ -265,16 +272,17 @@ function PlayerSelectionController() {
 
   return (
     <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-screen-xl flex-col px-4 py-8 md:px-6">
-      <div className="mb-6 flex flex-col gap-4 border-b pb-6 md:flex-row md:items-end md:justify-between">
-        <div className="space-y-1">
-          <div className="text-sm font-medium text-muted-foreground">
+      <div className="mb-6 flex flex-col gap-4 border-b pb-6 duration-700 animate-in fade-in slide-in-from-bottom-4 [animation-fill-mode:both] md:flex-row md:items-end md:justify-between">
+        <div className="space-y-2">
+          <div className="font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
             IsoLab
           </div>
-          <h1 className="text-3xl font-bold tracking-tight">
+          <h1 className="font-display text-4xl font-black uppercase tracking-tight">
             Stage a 1v1 matchup
           </h1>
-          <p className="text-sm text-muted-foreground">
-            Pick two players from any era and simulate a one-on-one game to 21.
+          <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
+            Pick two players from any era and simulate a one-on-one game to{" "}
+            <span className="font-mono tabular-nums text-foreground">21</span>.
           </p>
         </div>
         <div className="flex flex-col items-stretch gap-3 sm:items-end">
@@ -291,7 +299,7 @@ function PlayerSelectionController() {
                 <span className="flex w-full sm:w-auto">
                   <Button
                     disabled={!canRunSimulation || busy}
-                    className="w-full sm:w-auto"
+                    className="w-full font-mono uppercase tracking-wider sm:w-auto"
                     onClick={runSimulation}
                   >
                     {simulationLoading ? (
@@ -312,7 +320,7 @@ function PlayerSelectionController() {
             <Button
               variant="secondary"
               disabled={!canRunSimulation || busy}
-              className="sm:w-auto"
+              className="font-mono uppercase tracking-wider tabular-nums sm:w-auto"
               onClick={runBulkSimulation}
             >
               {bulkLoading ? (
@@ -342,10 +350,11 @@ function PlayerSelectionController() {
               : null
           }
         />
-        <div className="hidden h-full items-center justify-center lg:flex">
-          <div className="-mt-4 flex h-12 w-12 items-center justify-center rounded-full border bg-muted text-sm font-semibold text-muted-foreground">
+        <div className="hidden h-full flex-col items-center justify-center gap-2 self-center lg:flex">
+          <span className="font-display text-4xl font-black italic leading-none text-muted-foreground/50">
             VS
-          </div>
+          </span>
+          <span className="h-8 w-px bg-border" />
         </div>
         <PlayerSlot
           label="Player B"
@@ -526,7 +535,7 @@ function PlayerSlot({
 
   return (
     <div
-      className="flex min-h-[32rem] flex-col overflow-hidden rounded-lg border bg-card shadow-sm"
+      className="flex min-h-[32rem] flex-col overflow-hidden rounded-2xl border bg-card shadow-sm"
       style={
         seasonTeamColor
           ? {
@@ -546,7 +555,7 @@ function PlayerSlot({
       {/* Slot label, with Clear anchored to the card's top-right once a player
           is selected. */}
       <div className="flex items-center justify-between gap-2 border-b px-4 py-2.5">
-        <span className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+        <span className="flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
           <UserRound className="h-4 w-4" />
           {label}
         </span>
@@ -554,7 +563,7 @@ function PlayerSlot({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 px-2 text-muted-foreground"
+            className="h-7 px-2 font-mono text-xs uppercase tracking-wider text-muted-foreground"
             onClick={handleClear}
             aria-label="Clear player"
           >
@@ -573,12 +582,12 @@ function PlayerSlot({
               {/* Top row: name (left) + SEASON label (right) */}
               <div className="flex items-center justify-between gap-2">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <h2 className="text-xl font-semibold leading-tight">
+                  <h2 className="font-display text-2xl font-bold uppercase leading-none tracking-tight">
                     {profile.name}
                   </h2>
                   {confidenceTier && <ConfidenceBadge tier={confidenceTier} />}
                 </div>
-                <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                   Season
                 </span>
               </div>
@@ -664,7 +673,7 @@ function PlayerSlot({
               <button
                 type="button"
                 aria-label={`Select ${label}`}
-                className="flex flex-1 flex-col items-center justify-center gap-2 rounded-md border border-dashed text-sm text-muted-foreground transition-colors hover:border-solid hover:bg-muted/50"
+                className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed font-mono text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:border-solid hover:border-amber-500/40 hover:bg-muted/50"
               >
                 <UserRound className="h-8 w-8 opacity-40" />
                 Select {label}
@@ -674,7 +683,7 @@ function PlayerSlot({
           {/* Bottom half: one-click recommendations as a grid of headshot
               tiles — same confirm flow as a typed pick, just pre-named. */}
           <div className="flex flex-1 flex-col gap-2.5">
-            <span className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
               <Sparkles className="h-3 w-3" />
               Quick picks
             </span>
@@ -715,26 +724,26 @@ function QuickPickTile({
       disabled={disabled}
       onClick={onSelect}
       aria-label={`Quick pick ${pick.name}`}
-      className="flex flex-col items-center gap-1.5 rounded-md bg-background/70 p-2 text-center shadow-sm ring-1 ring-border transition-colors hover:bg-muted/50 disabled:opacity-50 disabled:hover:bg-background/70"
+      className="flex flex-col items-center gap-1.5 rounded-xl bg-background/70 p-2 text-center shadow-sm ring-1 ring-border transition-all hover:-translate-y-0.5 hover:bg-muted/50 hover:ring-amber-500/40 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:bg-background/70 disabled:hover:ring-border"
     >
       <div className="relative">
-        <Avatar className="h-11 w-11 rounded-md border bg-muted">
+        <Avatar className="h-11 w-11 rounded-lg border bg-muted">
           <AvatarImage
             src={`https://cdn.nba.com/headshots/nba/latest/1040x760/${pick.id}.png`}
             alt={pick.name}
             className="object-cover object-top"
           />
-          <AvatarFallback className="rounded-md text-xs font-semibold">
+          <AvatarFallback className="rounded-lg text-xs font-medium">
             {getInitials(pick.name)}
           </AvatarFallback>
         </Avatar>
         {resolving && (
-          <span className="absolute inset-0 flex items-center justify-center rounded-md bg-background/70">
+          <span className="absolute inset-0 flex items-center justify-center rounded-lg bg-background/70">
             <Loader2 className="h-4 w-4 animate-spin" />
           </span>
         )}
       </div>
-      <span className="line-clamp-2 text-[11px] font-medium leading-tight">
+      <span className="line-clamp-2 font-display text-xs font-medium uppercase leading-tight tracking-tight">
         {pick.name}
       </span>
     </button>
@@ -764,7 +773,7 @@ function SeasonSelector({
     >
       <SelectTrigger
         aria-label={`Select season for ${label}`}
-        className="h-auto w-fit gap-1.5 rounded-full border-0 bg-background/70 px-3 py-1 text-xs font-medium shadow-sm ring-1 ring-border focus-visible:ring-2"
+        className="h-auto w-fit gap-1.5 rounded-full border-0 bg-background/70 px-3 py-1 font-mono text-xs uppercase tracking-wider tabular-nums shadow-sm ring-1 ring-border focus-visible:ring-2"
       >
         <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
         <SelectValue
@@ -849,7 +858,7 @@ function SeasonStatsBody({
   ]
 
   return (
-    <div className="space-y-3.5 rounded-md bg-background/60 p-4 shadow-sm ring-1 ring-border">
+    <div className="space-y-3.5 rounded-lg bg-background/60 p-4 shadow-sm ring-1 ring-border">
       {bars.map((bar) => (
         <StatBar
           key={bar.label}
@@ -878,7 +887,7 @@ function StatBar({
   const fraction = Math.max(0.03, Math.min(1, value / max))
   return (
     <div className="flex items-center gap-3">
-      <span className="w-8 shrink-0 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+      <span className="w-8 shrink-0 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
         {label}
       </span>
       <div className="h-3 flex-1 overflow-hidden rounded-full bg-foreground/10">
@@ -890,7 +899,7 @@ function StatBar({
           }}
         />
       </div>
-      <span className="w-9 shrink-0 text-right text-sm font-semibold tabular-nums">
+      <span className="w-9 shrink-0 text-right font-mono text-sm font-medium tabular-nums">
         {value.toFixed(1)}
       </span>
     </div>
@@ -908,12 +917,14 @@ function VitalTile({
   value: string
 }) {
   return (
-    <div className="rounded-md bg-background/70 px-3 py-2.5 shadow-sm ring-1 ring-border">
-      <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+    <div className="rounded-lg bg-background/70 px-3 py-2.5 shadow-sm ring-1 ring-border">
+      <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
         <Icon className="h-3 w-3" />
         {label}
       </div>
-      <div className="mt-0.5 text-sm font-semibold tabular-nums">{value}</div>
+      <div className="mt-0.5 font-mono text-sm font-medium tabular-nums">
+        {value}
+      </div>
     </div>
   )
 }
@@ -921,9 +932,11 @@ function VitalTile({
 // Shared translucent stat tile, matching the shot-map chip treatment.
 function StatTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md bg-background/70 px-2 py-2.5 text-center shadow-sm ring-1 ring-border">
-      <div className="text-lg font-semibold tabular-nums">{value}</div>
-      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+    <div className="rounded-lg bg-background/70 px-2 py-2.5 text-center shadow-sm ring-1 ring-border">
+      <div className="font-display text-2xl font-bold tabular-nums leading-none">
+        {value}
+      </div>
+      <div className="mt-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
         {label}
       </div>
     </div>
@@ -940,13 +953,13 @@ function PlayerAvatar({
   className?: string
 }) {
   return (
-    <Avatar className={cn("h-14 w-14 shrink-0 rounded-md border bg-muted", className)}>
+    <Avatar className={cn("h-14 w-14 shrink-0 rounded-lg border bg-muted", className)}>
       <AvatarImage
         src={`https://cdn.nba.com/headshots/nba/latest/1040x760/${playerId}.png`}
         alt={name}
         className="object-cover object-top"
       />
-      <AvatarFallback className="rounded-md text-sm font-semibold">
+      <AvatarFallback className="rounded-lg text-sm font-medium">
         {getInitials(name)}
       </AvatarFallback>
     </Avatar>
@@ -979,7 +992,11 @@ function Pill({
   return (
     <Badge
       variant="outline"
-      className={cn("gap-1.5 font-medium", PILL_TONES[tone], className)}
+      className={cn(
+        "gap-1.5 font-mono text-[0.65rem] uppercase tracking-wider",
+        PILL_TONES[tone],
+        className
+      )}
     >
       {dot && <span className="size-1.5 rounded-full bg-current" />}
       {children}
@@ -1017,13 +1034,13 @@ function PossessionModeToggle({
 }) {
   return (
     <div className="flex flex-col gap-1.5 sm:items-end">
-      <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
         Possession mode
       </span>
       <div
         role="radiogroup"
         aria-label="Possession mode"
-        className="inline-flex rounded-md border bg-muted/40 p-0.5"
+        className="inline-flex rounded-lg border bg-muted/40 p-0.5"
       >
         {POSSESSION_MODES.map((mode) => {
           const Icon = mode.icon
@@ -1039,10 +1056,10 @@ function PossessionModeToggle({
               disabled={disabled}
               onClick={() => onChange(mode.value)}
               className={cn(
-                "inline-flex items-center gap-1.5 rounded-[5px] px-3 py-1.5 text-sm font-medium transition-colors",
+                "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 font-mono text-xs uppercase tracking-wider transition-colors",
                 "disabled:cursor-not-allowed disabled:opacity-50",
                 active
-                  ? "bg-background text-foreground shadow-sm"
+                  ? "bg-background text-amber-600 shadow-sm dark:text-amber-400"
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
@@ -1065,36 +1082,96 @@ function WinProbabilityCard({
   playerB: PlayerProfile
   result: BulkSimulationResult
 }) {
+  const aWins = result.player_a_win_pct >= result.player_b_win_pct
   return (
-    <Card className="mt-6 rounded-lg">
+    <Card className="mt-6 rounded-2xl">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+        <CardTitle className="flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
           <Percent className="h-4 w-4" />
-          Win probability · {result.total_simulations.toLocaleString()} simulations
+          Win probability ·{" "}
+          <span className="tabular-nums">
+            {result.total_simulations.toLocaleString()}
+          </span>{" "}
+          simulations
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="flex items-center justify-between text-sm font-medium">
-          <span className="flex items-center gap-2">
-            <span className="h-2.5 w-2.5 rounded-full bg-primary" />
+      <CardContent className="space-y-2">
+        <div className="flex items-center justify-between font-mono text-[0.6rem] uppercase tracking-wider">
+          <span
+            className={cn(
+              "truncate",
+              aWins
+                ? "text-amber-600 dark:text-amber-400"
+                : "text-muted-foreground"
+            )}
+          >
             {playerA.name}
           </span>
-          <span className="flex items-center gap-2">
+          <span className="shrink-0 px-2 text-muted-foreground">
+            Win probability
+          </span>
+          <span
+            className={cn(
+              "truncate text-right",
+              !aWins
+                ? "text-amber-600 dark:text-amber-400"
+                : "text-muted-foreground"
+            )}
+          >
             {playerB.name}
-            <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground/40" />
           </span>
         </div>
-        <Progress value={result.player_a_win_pct} className="h-3" />
-        <div className="flex items-center justify-between text-2xl font-bold">
-          <span>{Math.round(result.player_a_win_pct)}%</span>
-          <span className="text-muted-foreground">
+        <div className="flex h-3 overflow-hidden rounded-full bg-muted">
+          <div
+            className={cn("h-full", aWins ? "bg-amber-500" : "bg-foreground/35")}
+            style={{ width: `${result.player_a_win_pct}%` }}
+          />
+          {!aWins && (
+            <div
+              className="h-full bg-amber-500"
+              style={{ width: `${result.player_b_win_pct}%` }}
+            />
+          )}
+        </div>
+        <div className="flex items-center justify-between font-display text-3xl font-black tabular-nums">
+          <span
+            className={
+              aWins
+                ? "text-amber-600 dark:text-amber-400"
+                : "text-muted-foreground"
+            }
+          >
+            {Math.round(result.player_a_win_pct)}%
+          </span>
+          <span
+            className={
+              !aWins
+                ? "text-amber-600 dark:text-amber-400"
+                : "text-muted-foreground"
+            }
+          >
             {Math.round(result.player_b_win_pct)}%
           </span>
         </div>
-        <p className="text-xs text-muted-foreground">
-          {playerA.name} won {result.player_a_wins.toLocaleString()},{" "}
-          {playerB.name} won {result.player_b_wins.toLocaleString()}
-          {result.ties > 0 && `, ${result.ties.toLocaleString()} ties`}.
+        <p className="pt-1 font-mono text-[0.65rem] uppercase tracking-wider text-muted-foreground">
+          {playerA.name} won{" "}
+          <span className="tabular-nums text-foreground">
+            {result.player_a_wins.toLocaleString()}
+          </span>
+          , {playerB.name} won{" "}
+          <span className="tabular-nums text-foreground">
+            {result.player_b_wins.toLocaleString()}
+          </span>
+          {result.ties > 0 && (
+            <>
+              ,{" "}
+              <span className="tabular-nums text-foreground">
+                {result.ties.toLocaleString()}
+              </span>{" "}
+              ties
+            </>
+          )}
+          .
         </p>
       </CardContent>
     </Card>
@@ -1135,19 +1212,19 @@ export function MatchSummaryView({
 }) {
   const aWon = summary.final_score.a >= summary.final_score.b
   return (
-    <Card className="rounded-lg">
+    <Card className="rounded-2xl">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+        <CardTitle className="flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
           <Trophy className="h-4 w-4" />
           Match summary
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-5">
         <div className="space-y-2">
-          <div className="text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <div className="text-center font-mono text-[0.6rem] uppercase tracking-[0.2em] text-muted-foreground">
             Final
           </div>
-          <div className="divide-y overflow-hidden rounded-md border">
+          <div className="divide-y overflow-hidden rounded-lg border">
             <ScoreRow
               name={playerAName}
               score={summary.final_score.a}
@@ -1178,7 +1255,7 @@ export function MatchSummaryView({
         {onRerun && (
           <Button
             variant="outline"
-            className="w-full"
+            className="w-full font-mono uppercase tracking-wider"
             onClick={onRerun}
             disabled={rerunDisabled}
           >
@@ -1208,13 +1285,20 @@ function ScoreRow({
     <div
       className={cn(
         "flex items-center justify-between gap-3 px-4 py-3",
-        winner ? "bg-emerald-500/5" : "bg-muted/20"
+        winner ? "bg-amber-500/5" : "bg-muted/20"
       )}
     >
       <div className="flex min-w-0 items-center gap-2">
-        <span className="truncate font-semibold">{name}</span>
+        <span
+          className={cn(
+            "truncate font-display text-lg font-bold uppercase leading-none tracking-tight",
+            winner && "text-amber-600 dark:text-amber-400"
+          )}
+        >
+          {name}
+        </span>
         {winner && (
-          <Pill tone="success">
+          <Pill tone="warning">
             <Trophy className="h-3 w-3" />
             Winner
           </Pill>
@@ -1222,8 +1306,8 @@ function ScoreRow({
       </div>
       <span
         className={cn(
-          "text-3xl font-bold tabular-nums",
-          !winner && "text-muted-foreground"
+          "font-display text-3xl font-black tabular-nums",
+          winner ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
         )}
       >
         {score}
@@ -1240,8 +1324,10 @@ function PlayerStatsSummary({
   stats: PlayerSimStats
 }) {
   return (
-    <div className="space-y-4 rounded-md border p-4">
-      <div className="font-semibold">{playerName}</div>
+    <div className="space-y-4 rounded-lg border p-4">
+      <div className="font-display text-lg font-bold uppercase leading-none tracking-tight">
+        {playerName}
+      </div>
 
       <div className="grid grid-cols-3 gap-2">
         <StatTile label="PTS" value={String(stats.points)} />
@@ -1256,7 +1342,7 @@ function PlayerStatsSummary({
         }
       />
 
-      <div className="flex items-center gap-4 border-t pt-3 text-xs text-muted-foreground">
+      <div className="flex items-center gap-4 border-t pt-3 font-mono text-[0.65rem] uppercase tracking-wider text-muted-foreground">
         <span>
           Turnovers{" "}
           <span className="font-medium tabular-nums text-foreground">
@@ -1336,10 +1422,10 @@ function ShotMap({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
           Shot map
         </span>
-        <span className="text-xs tabular-nums text-muted-foreground">
+        <span className="font-mono text-xs uppercase tracking-wider tabular-nums text-muted-foreground">
           {total} FGA
         </span>
       </div>
@@ -1414,7 +1500,7 @@ function ZoneChip({
   return (
     <span
       style={style}
-      className="absolute left-1/2 flex -translate-x-1/2 -translate-y-1/2 items-baseline gap-1 rounded-md bg-background/85 px-1.5 py-0.5 text-[11px] font-medium shadow-sm ring-1 ring-border"
+      className="absolute left-1/2 flex -translate-x-1/2 -translate-y-1/2 items-baseline gap-1 rounded-md bg-background/85 px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wider shadow-sm ring-1 ring-border"
     >
       <span>{label}</span>
       <span className="tabular-nums">
@@ -1425,85 +1511,337 @@ function ZoneChip({
   )
 }
 
-// Exported for reuse by the GOAT Bracket series drill-down.
-export function PlayByPlayView({ playByPlay }: { playByPlay: PlayByPlay[] }) {
+// A possession enriched with the duel context we visualize: which side shot,
+// the running lead, whether the lead just flipped, and any scoring-run milestone.
+interface EnrichedPlay {
+  play: PlayByPlay
+  side: "a" | "b"
+  margin: number
+  leadChange: boolean
+  runSide: "a" | "b" | null
+  runCallout: number | null
+}
+
+// Figure out which player name is "A" vs "B" purely from score deltas:
+// score_a only grows on A's makes. Explicit name hints win; the complement
+// covers a player who never scored. Keeps the bracket caller prop-free.
+function resolveSides(plays: PlayByPlay[], hintA?: string, hintB?: string) {
+  const map = new Map<string, "a" | "b">()
+  let pa = 0
+  let pb = 0
+  for (const p of plays) {
+    if (p.score_a > pa) map.set(p.offensive_player, "a")
+    if (p.score_b > pb) map.set(p.offensive_player, "b")
+    pa = p.score_a
+    pb = p.score_b
+  }
+  const names = Array.from(new Set(plays.map((p) => p.offensive_player)))
+  let nameA = hintA ?? [...map].find(([, s]) => s === "a")?.[0]
+  let nameB = hintB ?? [...map].find(([, s]) => s === "b")?.[0]
+  if (!nameA) nameA = names.find((n) => n !== nameB)
+  if (!nameB) nameB = names.find((n) => n !== nameA)
+  return { nameA: nameA ?? "Player A", nameB: nameB ?? "Player B" }
+}
+
+function enrichPlays(plays: PlayByPlay[], nameA: string): EnrichedPlay[] {
+  let prevMargin = 0
+  let runSide: "a" | "b" | null = null
+  let runPts = 0
+  let lastEmitted = 0
+  return plays.map((play, i) => {
+    const prev = plays[i - 1]
+    const pts =
+      play.score_a -
+      (prev?.score_a ?? 0) +
+      (play.score_b - (prev?.score_b ?? 0))
+    const side: "a" | "b" = play.offensive_player === nameA ? "a" : "b"
+    const margin = play.score_a - play.score_b
+    const leadChange =
+      i > 0 &&
+      margin !== 0 &&
+      prevMargin !== 0 &&
+      Math.sign(margin) !== Math.sign(prevMargin)
+
+    let runCallout: number | null = null
+    if (pts > 0) {
+      if (runSide === side) {
+        runPts += pts
+      } else {
+        runSide = side
+        runPts = pts
+        lastEmitted = 0
+      }
+      // Announce a run once it reaches 6, then again every +4 so it doesn't spam.
+      if (runPts >= 6 && runPts - lastEmitted >= 4) {
+        runCallout = runPts
+        lastEmitted = runPts
+      }
+    }
+    prevMargin = margin
+    return { play, side, margin, leadChange, runSide, runCallout }
+  })
+}
+
+// Exported for reuse by the GOAT Bracket series drill-down. playerA/playerB are
+// optional name hints; without them the sides are inferred from the score.
+export function PlayByPlayView({
+  playByPlay,
+  playerA,
+  playerB,
+}: {
+  playByPlay: PlayByPlay[]
+  playerA?: string
+  playerB?: string
+}) {
+  const { nameA, nameB } = useMemo(
+    () => resolveSides(playByPlay, playerA, playerB),
+    [playByPlay, playerA, playerB]
+  )
+  const enriched = useMemo(
+    () => enrichPlays(playByPlay, nameA),
+    [playByPlay, nameA]
+  )
+  const last = enriched[enriched.length - 1]
+  const margin = last ? last.margin : 0
+  const leader = margin > 0 ? nameA : margin < 0 ? nameB : null
+
   return (
-    <Card className="flex flex-col rounded-lg">
-      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
-        <CardTitle className="text-sm font-medium text-muted-foreground">
+    <Card className="flex flex-col rounded-2xl">
+      <CardHeader className="space-y-0 pb-3">
+        <CardTitle className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
           Play-by-play
         </CardTitle>
       </CardHeader>
-      <CardContent className="flex min-h-0 flex-1 flex-col">
-        <div className="scrollbar-hide min-h-[20rem] flex-1 space-y-2 overflow-y-auto pr-1 xl:min-h-0">
-          {playByPlay.map((play) => (
-            <div
-              key={play.possession}
-              className="grid grid-cols-[2.5rem_1fr_auto] items-center gap-3 rounded-md border p-3 text-sm"
-            >
-              <div className="text-xs font-medium tabular-nums text-muted-foreground">
-                #{play.possession}
-              </div>
-              <div className="min-w-0">
-                <div className="truncate font-medium">
-                  {play.offensive_player}
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  {playDetail(play)}
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <OutcomeBadge play={play} />
-                <span className="w-12 text-right font-semibold tabular-nums">
-                  {play.score_a}-{play.score_b}
-                </span>
-              </div>
+      <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
+        {enriched.length > 0 && (
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                Lead margin
+              </span>
+              <span className="font-mono text-[10px] uppercase tracking-wider tabular-nums">
+                {leader ? (
+                  <>
+                    <span className="text-amber-600 dark:text-amber-400">
+                      {leader}
+                    </span>{" "}
+                    +{Math.abs(margin)}
+                  </>
+                ) : (
+                  <span className="text-muted-foreground">Tied</span>
+                )}
+              </span>
             </div>
+            <MarginSparkline enriched={enriched} />
+          </div>
+        )}
+
+        <div className="scrollbar-hide min-h-[20rem] flex-1 overflow-y-auto xl:min-h-0">
+          {/* Sticky lane labels: who's on the left vs right of the duel. */}
+          <div className="sticky top-0 z-10 grid grid-cols-[1fr_auto_1fr] items-center border-b bg-card/95 backdrop-blur">
+            <span className="truncate py-2 pr-3 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+              {nameA}
+            </span>
+            <span className="min-w-[4.5rem] px-3 py-2 text-center font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground/70">
+              Score
+            </span>
+            <span className="truncate py-2 pl-3 text-left font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+              {nameB}
+            </span>
+          </div>
+
+          {enriched.map((e, i) => (
+            <Fragment key={e.play.possession}>
+              <PossessionRow e={e} index={i} />
+              {e.leadChange && <LeadChangeDivider />}
+              {e.runCallout != null && (
+                <RunBanner
+                  name={e.runSide === "a" ? nameA : nameB}
+                  points={e.runCallout}
+                />
+              )}
+            </Fragment>
           ))}
+
+          {enriched.length === 0 && (
+            <div className="flex min-h-[20rem] items-center justify-center font-mono text-xs uppercase tracking-wider text-muted-foreground">
+              No plays to show
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>
   )
 }
 
-function OutcomeBadge({ play }: { play: PlayByPlay }) {
-  if (play.turnover) {
-    return (
-      <Pill tone="danger" dot>
-        Turnover
-      </Pill>
-    )
-  }
-  if (play.foul) {
-    return (
-      <Pill tone="warning" dot>
-        Foul
-      </Pill>
-    )
-  }
-  if (play.result === "made") {
-    return (
-      <Pill tone="success" dot>
-        Made
-      </Pill>
-    )
-  }
+// Lead margin (score_a - score_b) over the game: amber above the centerline
+// when A is ahead, neutral below when B is ahead. Pure inline SVG.
+function MarginSparkline({ enriched }: { enriched: EnrichedPlay[] }) {
+  const clipId = useId()
+  const W = 600
+  const H = 56
+  const mid = H / 2
+  const maxM = 21
+  const n = enriched.length
+  const xOf = (i: number) => (n <= 1 ? W / 2 : (i / (n - 1)) * W)
+  const yOf = (m: number) =>
+    mid - (Math.max(-maxM, Math.min(maxM, m)) / maxM) * (mid - 3)
+  const line = enriched.map((e, i) => `${xOf(i)},${yOf(e.margin)}`).join(" ")
+  const area =
+    `M ${xOf(0)},${mid} ` +
+    enriched.map((e, i) => `L ${xOf(i)},${yOf(e.margin)}`).join(" ") +
+    ` L ${xOf(n - 1)},${mid} Z`
   return (
-    <Pill tone="neutral" dot>
-      Missed
-    </Pill>
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="none"
+      className="h-12 w-full"
+      aria-hidden
+    >
+      <defs>
+        <clipPath id={`${clipId}-t`}>
+          <rect x="0" y="0" width={W} height={mid} />
+        </clipPath>
+        <clipPath id={`${clipId}-b`}>
+          <rect x="0" y={mid} width={W} height={mid} />
+        </clipPath>
+      </defs>
+      <path
+        d={area}
+        className="fill-amber-500/20"
+        clipPath={`url(#${clipId}-t)`}
+      />
+      <path
+        d={area}
+        className="fill-foreground/[0.06]"
+        clipPath={`url(#${clipId}-b)`}
+      />
+      <line
+        x1="0"
+        y1={mid}
+        x2={W}
+        y2={mid}
+        className="stroke-border"
+        strokeDasharray="3 4"
+      />
+      <polyline
+        points={line}
+        fill="none"
+        className="stroke-amber-500"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
   )
 }
 
-function playDetail(play: PlayByPlay): string {
-  if (play.turnover) {
-    return "Lost possession"
-  }
-  if (play.foul) {
-    return "Drew a foul — possession retained"
-  }
-  const type = formatShotType(play.shot_type)
-  return type.charAt(0).toUpperCase() + type.slice(1)
+function PossessionRow({ e, index }: { e: EnrichedPlay; index: number }) {
+  const { play, side } = e
+  const isA = side === "a"
+  const made = play.result === "made" && !play.turnover
+  const dotClass = play.turnover
+    ? "bg-red-500"
+    : made
+      ? "bg-amber-500"
+      : play.foul
+        ? "bg-amber-500/60"
+        : "bg-muted-foreground/40"
+  const detail = play.turnover
+    ? "Turnover"
+    : play.foul
+      ? "Foul drawn"
+      : `${formatShotType(play.shot_type)} · ${made ? "Made" : "Missed"}`
+
+  const content = (
+    <div
+      className={cn(
+        "flex min-w-0 flex-col gap-1",
+        isA ? "items-end text-right" : "items-start text-left"
+      )}
+    >
+      <span className="max-w-full truncate font-display text-sm font-semibold uppercase leading-none tracking-tight">
+        {play.offensive_player}
+      </span>
+      <span
+        className={cn(
+          "flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground",
+          isA && "flex-row-reverse"
+        )}
+      >
+        <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", dotClass)} />
+        <span className="truncate">{detail}</span>
+      </span>
+    </div>
+  )
+
+  return (
+    <div
+      className={cn(
+        "grid grid-cols-[1fr_auto_1fr] items-stretch animate-in fade-in slide-in-from-bottom-1 duration-300 [animation-fill-mode:both]",
+        index > 0 && "border-t border-border/60"
+      )}
+      style={{ animationDelay: `${Math.min(index * 18, 360)}ms` }}
+    >
+      <div
+        className={cn(
+          "flex items-center justify-end py-2.5 pr-3",
+          made && isA && "border-r-2 border-amber-500"
+        )}
+      >
+        {isA ? content : null}
+      </div>
+      <div className="flex min-w-[4.5rem] flex-col items-center justify-center gap-0.5 border-x border-border/60 bg-muted/20 px-3 py-2">
+        <span className="flex items-baseline gap-1 font-display text-lg font-bold tabular-nums leading-none">
+          <span className={play.score_a > play.score_b ? "text-amber-500" : ""}>
+            {play.score_a}
+          </span>
+          <span className="text-xs text-muted-foreground">–</span>
+          <span className={play.score_b > play.score_a ? "text-amber-500" : ""}>
+            {play.score_b}
+          </span>
+        </span>
+        <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground tabular-nums">
+          {play.score_a === play.score_b
+            ? "Tied"
+            : `+${Math.abs(play.score_a - play.score_b)}`}
+        </span>
+      </div>
+      <div
+        className={cn(
+          "flex items-center justify-start py-2.5 pl-3",
+          made && !isA && "border-l-2 border-amber-500"
+        )}
+      >
+        {!isA ? content : null}
+      </div>
+    </div>
+  )
+}
+
+function LeadChangeDivider() {
+  return (
+    <div className="flex items-center gap-2 px-2 py-1.5">
+      <div className="h-px flex-1 bg-amber-500/30" />
+      <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-amber-600 dark:text-amber-400">
+        Lead change
+      </span>
+      <div className="h-px flex-1 bg-amber-500/30" />
+    </div>
+  )
+}
+
+function RunBanner({ name, points }: { name: string; points: number }) {
+  return (
+    <div className="my-1 flex items-center justify-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5">
+      <span className="font-display text-sm font-semibold uppercase tracking-tight text-amber-600 dark:text-amber-400">
+        {name}
+      </span>
+      <span className="font-mono text-[10px] uppercase tracking-wider tabular-nums text-amber-600/80 dark:text-amber-400/80">
+        {points}-0 run
+      </span>
+    </div>
+  )
 }
 
 function getInitials(name: string) {
