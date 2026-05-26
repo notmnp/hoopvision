@@ -35,10 +35,12 @@ export default function TendencyComparisonPanel({
   statsB,
   onViewShotChart,
 }: TendencyComparisonPanelProps) {
-  const effA = scoringEfficiency(statsA)
-  const effB = scoringEfficiency(statsB)
-  const heightA = heightToInches(playerA.height)
-  const heightB = heightToInches(playerB.height)
+  const tsA = statsA.true_shooting_pct
+  const tsB = statsB.true_shooting_pct
+  const astToA = assistTurnoverRatio(statsA)
+  const astToB = assistTurnoverRatio(statsB)
+  const stocksA = defensiveStocks(statsA)
+  const stocksB = defensiveStocks(statsB)
 
   return (
     <Card className="mt-6 rounded-2xl border bg-card">
@@ -71,19 +73,14 @@ export default function TendencyComparisonPanel({
           />
         </div>
 
-        {/* Key stats */}
-        <Section title="Key stats">
+        {/* Scoring & shooting — efficiency/rate metrics the player cards (which
+            show raw per-game volume) don't surface. */}
+        <Section title="Scoring & shooting">
           <CompareRow
-            label="Points / game"
-            a={statsA.points_per_game.toFixed(1)}
-            b={statsB.points_per_game.toFixed(1)}
-            edge={edgeOf(statsA.points_per_game, statsB.points_per_game, "high")}
-          />
-          <CompareRow
-            label="Scoring efficiency (pts / FGA)"
-            a={effA.toFixed(2)}
-            b={effB.toFixed(2)}
-            edge={edgeOf(effA, effB, "high")}
+            label="True shooting %"
+            a={formatPct(tsA)}
+            b={formatPct(tsB)}
+            edge={edgeOf(tsA, tsB, "high")}
           />
           <CompareRow
             label="3PT shot rate"
@@ -96,6 +93,12 @@ export default function TendencyComparisonPanel({
             )}
           />
           <CompareRow
+            label="Free-throw %"
+            a={formatPct(statsA.free_throw_pct)}
+            b={formatPct(statsB.free_throw_pct)}
+            edge={edgeOf(statsA.free_throw_pct, statsB.free_throw_pct, "high")}
+          />
+          <CompareRow
             label="Foul-drawing rate (FTA / FGA)"
             a={formatPct(statsA.free_throw_attempt_rate)}
             b={formatPct(statsB.free_throw_attempt_rate)}
@@ -105,6 +108,17 @@ export default function TendencyComparisonPanel({
               "high"
             )}
           />
+        </Section>
+
+        {/* Playmaking & defense — replaces the Physical section, whose
+            height/weight/wingspan already appear on each player card. */}
+        <Section title="Playmaking & defense">
+          <CompareRow
+            label="Assist-to-turnover ratio"
+            a={astToA.toFixed(1)}
+            b={astToB.toFixed(1)}
+            edge={edgeOf(astToA, astToB, "high")}
+          />
           <CompareRow
             label="Turnovers / game"
             a={statsA.turnover_per_game.toFixed(1)}
@@ -112,27 +126,22 @@ export default function TendencyComparisonPanel({
             // Fewer turnovers is the edge.
             edge={edgeOf(statsA.turnover_per_game, statsB.turnover_per_game, "low")}
           />
-        </Section>
-
-        {/* Physical attributes */}
-        <Section title="Physical">
           <CompareRow
-            label="Height"
-            a={playerA.height ?? "N/A"}
-            b={playerB.height ?? "N/A"}
-            edge={edgeOf(heightA, heightB, "high")}
+            label="Defensive disruption (STL + BLK)"
+            a={stocksA.toFixed(1)}
+            b={stocksB.toFixed(1)}
+            edge={edgeOf(stocksA, stocksB, "high")}
           />
           <CompareRow
-            label="Weight"
-            a={formatWeight(playerA.weight)}
-            b={formatWeight(playerB.weight)}
-            edge={edgeOf(weightToNumber(playerA.weight), weightToNumber(playerB.weight), "high")}
-          />
-          <CompareRow
-            label="Wingspan"
-            a={formatWingspan(playerA.wingspan)}
-            b={formatWingspan(playerB.wingspan)}
-            edge={edgeOf(playerA.wingspan, playerB.wingspan, "high")}
+            label="Fouls / game"
+            a={statsA.personal_foul_per_game.toFixed(1)}
+            b={statsB.personal_foul_per_game.toFixed(1)}
+            // Fewer fouls is the edge.
+            edge={edgeOf(
+              statsA.personal_foul_per_game,
+              statsB.personal_foul_per_game,
+              "low"
+            )}
           />
         </Section>
 
@@ -144,40 +153,22 @@ export default function TendencyComparisonPanel({
           </div>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             <DifferentialTile
-              label="Height gap"
-              value={
-                heightA !== null && heightB !== null
-                  ? `${Math.abs(heightA - heightB)}"`
-                  : "N/A"
-              }
-              detail={heightEdgeLabel(playerA, playerB, heightA, heightB)}
-              edge={
-                heightA !== null && heightB !== null && heightA !== heightB
-              }
+              label="True shooting %"
+              value={`${formatSigned((tsA - tsB) * 100)}%`}
+              detail={edgeLabel(playerA.name, playerB.name, tsA - tsB)}
+              edge={Math.abs(tsA - tsB) >= 0.005}
             />
             <DifferentialTile
-              label="Scoring efficiency"
-              value={`${formatSigned(effA - effB)} pts/FGA`}
-              detail={edgeLabel(playerA.name, playerB.name, effA - effB)}
-              edge={Math.abs(effA - effB) >= 0.005}
+              label="Assist-to-TO ratio"
+              value={formatSigned(astToA - astToB)}
+              detail={edgeLabel(playerA.name, playerB.name, astToA - astToB)}
+              edge={Math.abs(astToA - astToB) >= 0.05}
             />
             <DifferentialTile
-              label="Turnover rate"
-              value={`${formatSigned(
-                statsA.turnover_per_game - statsB.turnover_per_game
-              )} /game`}
-              detail={edgeLabel(
-                // Fewer turnovers is the edge: a positive (B − A) delta means B
-                // commits more, so player A holds the advantage.
-                playerA.name,
-                playerB.name,
-                statsB.turnover_per_game - statsA.turnover_per_game
-              )}
-              edge={
-                Math.abs(
-                  statsB.turnover_per_game - statsA.turnover_per_game
-                ) >= 0.005
-              }
+              label="Defensive disruption"
+              value={`${formatSigned(stocksA - stocksB)} /game`}
+              detail={edgeLabel(playerA.name, playerB.name, stocksA - stocksB)}
+              edge={Math.abs(stocksA - stocksB) >= 0.05}
             />
           </div>
         </div>
@@ -315,35 +306,16 @@ function edgeOf(
   return aWins ? "a" : "b"
 }
 
-function scoringEfficiency(stats: PlayerSeasonStats): number {
-  if (!stats.fga_per_game) return 0
-  return stats.points_per_game / stats.fga_per_game
+// Playmaking efficiency: assists earned per turnover committed.
+function assistTurnoverRatio(stats: PlayerSeasonStats): number {
+  return stats.turnover_per_game > 0
+    ? stats.assist_per_game / stats.turnover_per_game
+    : stats.assist_per_game
 }
 
-function heightToInches(height: string | null): number | null {
-  if (!height) return null
-  const match = /(\d+)\s*-\s*(\d+)/.exec(height)
-  if (!match) return null
-  return Number(match[1]) * 12 + Number(match[2])
-}
-
-function weightToNumber(weight: string | null): number | null {
-  if (!weight) return null
-  const parsed = Number.parseFloat(weight)
-  return Number.isNaN(parsed) ? null : parsed
-}
-
-function heightEdgeLabel(
-  playerA: PlayerProfile,
-  playerB: PlayerProfile,
-  heightA: number | null,
-  heightB: number | null
-): string {
-  if (heightA === null || heightB === null) return "—"
-  if (heightA === heightB) return "Even"
-  return heightA > heightB
-    ? `${playerA.name} taller`
-    : `${playerB.name} taller`
+// "Stocks": combined defensive disruption (steals + blocks per game).
+function defensiveStocks(stats: PlayerSeasonStats): number {
+  return stats.steal_per_game + stats.block_per_game
 }
 
 // Positive delta means `positiveName` holds the edge; negative means `negativeName`.
@@ -363,12 +335,4 @@ function formatSigned(value: number): string {
 
 function formatPct(value: number): string {
   return `${(value * 100).toFixed(1)}%`
-}
-
-function formatWeight(weight: string | null): string {
-  return weight ? `${weight} lb` : "N/A"
-}
-
-function formatWingspan(wingspan: number | null): string {
-  return typeof wingspan === "number" ? `${wingspan.toFixed(1)} in` : "N/A"
 }

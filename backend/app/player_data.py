@@ -36,7 +36,20 @@ SEASON_STAT_COLUMNS = (
     "steal_per_game",
 )
 
-_TOTAL_COLUMNS = ("GP", "PTS", "FGA", "FG3A", "FTA", "AST", "TOV", "REB", "BLK", "STL")
+_TOTAL_COLUMNS = (
+    "GP",
+    "PTS",
+    "FGA",
+    "FG3A",
+    "FTA",
+    "FTM",
+    "AST",
+    "TOV",
+    "REB",
+    "BLK",
+    "STL",
+    "PF",
+)
 
 
 def fetch_career_season_rows(player_id: int) -> list[dict[str, Any]]:
@@ -109,6 +122,13 @@ def season_stats_from_totals(
         "rebound_per_game": _per_game(totals.get("REB"), games),
         "block_per_game": _per_game(totals.get("BLK"), games),
         "steal_per_game": _per_game(totals.get("STL"), games),
+        "personal_foul_per_game": _per_game(totals.get("PF"), games),
+        # True shooting accounts for 3s and free throws: PTS / (2 * (FGA + 0.44*FTA)).
+        "true_shooting_pct": _safe_rate(
+            totals.get("PTS"),
+            2 * (_to_float(totals.get("FGA")) + 0.44 * _to_float(totals.get("FTA"))),
+        ),
+        "free_throw_pct": _safe_rate(totals.get("FTM"), totals.get("FTA")),
     }
 
 

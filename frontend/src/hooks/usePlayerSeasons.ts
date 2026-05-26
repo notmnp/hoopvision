@@ -22,6 +22,9 @@ export interface PlayerSeasonStats {
   rebound_per_game: number
   block_per_game: number
   steal_per_game: number
+  personal_foul_per_game: number
+  true_shooting_pct: number
+  free_throw_pct: number
 }
 
 export function usePlayerSeasons() {
