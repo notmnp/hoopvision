@@ -17,17 +17,29 @@ const Scoreboard = () => {
   const { games, loading, error } = useScoreboard()
 
   return (
-    <div className="mx-auto min-h-screen max-w-screen-lg px-4 py-8">
-      <div className="mb-8 space-y-1">
-        <h1 className="text-4xl font-extrabold tracking-tight">Scoreboard</h1>
-        <p className="text-sm text-muted-foreground">
-          Today's games around the league.
-        </p>
+    <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-screen-xl flex-col px-4 py-8 md:px-6">
+      <div className="mb-6 flex flex-col gap-4 border-b pb-6 md:flex-row md:items-end md:justify-between">
+        <div className="space-y-1">
+          <div className="text-sm font-medium text-muted-foreground">
+            Live Scores
+          </div>
+          <h1 className="text-3xl font-bold tracking-tight">
+            Around the league
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Today's games, scores, and game leaders from across the NBA.
+          </p>
+        </div>
+        {!loading && !error && games.length > 0 && (
+          <Badge variant="secondary" className="w-fit">
+            {games.length} {games.length === 1 ? "game" : "games"} today
+          </Badge>
+        )}
       </div>
 
       {loading && (
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-          {Array.from({ length: 4 }).map((_, index) => (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, index) => (
             <GameCardSkeleton key={index} />
           ))}
         </div>
@@ -42,7 +54,7 @@ const Scoreboard = () => {
       )}
 
       {!loading && !error && games.length === 0 && (
-        <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-16 text-center">
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-16 text-center">
           <CalendarOff className="h-8 w-8 text-muted-foreground/50" />
           <p className="text-sm text-muted-foreground">
             No games available right now.
@@ -51,7 +63,7 @@ const Scoreboard = () => {
       )}
 
       {!loading && !error && games.length > 0 && (
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {games.map((game) => (
             <GameCard key={game.gameId} game={game} />
           ))}

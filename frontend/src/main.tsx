@@ -9,7 +9,6 @@ import Home from './pages/Home.tsx'
 import Scoreboard from './pages/Scoreboard.tsx'
 import Simulator from './pages/Simulator.tsx'
 import BracketSetup from './pages/BracketSetup.tsx'
-import BracketView from './pages/BracketView.tsx'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -21,8 +20,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/" element={<Home />} />
             <Route path="/live" element={<Scoreboard />} />
             <Route path="/simulate" element={<Simulator />} />
-            <Route path="/bracket" element={<BracketSetup />} />
-            <Route path="/bracket/:bracketId" element={<BracketView />} />
+            <Route path="/bracket/:bracketId?" element={<BracketSetup />} />
           </Routes>
         </TooltipProvider>
       </ThemeProvider>

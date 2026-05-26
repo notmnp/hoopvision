@@ -1,25 +1,17 @@
-import {
-  CSSProperties,
-  ReactNode,
-  useEffect,
-  useRef,
-  useState,
-} from "react"
+import { CSSProperties, ReactNode, useEffect, useState } from "react"
 import axios from "axios"
-import { Command as CommandPrimitive } from "cmdk"
 import { API_BASE_URL } from "@/lib/config"
 import {
   AlertTriangle,
   CalendarDays,
-  FastForward,
   Loader2,
   MoveHorizontal,
   Percent,
   Repeat,
   RotateCcw,
   Ruler,
-  Search,
   Shuffle,
+  Sparkles,
   Swords,
   Trophy,
   UserRound,
@@ -37,12 +29,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import {
-  CommandEmpty,
-  CommandGroup,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command"
+import { PlayerSearchCombobox } from "@/components/PlayerSearchCombobox"
 import { Progress } from "@/components/ui/progress"
 import {
   Select,
@@ -56,12 +43,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import {
-  PlayerProfile,
-  PlayerSuggestion,
-  usePlayerSearch,
-  usePlayerSuggestions,
-} from "@/hooks/usePlayerSearch"
+import { PlayerProfile, usePlayerSearch } from "@/hooks/usePlayerSearch"
 import {
   PlayerSeasonStats,
   usePlayerSeasons,
@@ -104,9 +86,6 @@ const POSSESSION_MODES: {
   },
 ]
 
-// One revealed possession per tick while the play-by-play log animates in.
-const PLAY_BY_PLAY_TICK_MS = 120
-
 const CONFIDENCE_TOOLTIPS: Record<ConfidenceTier, string> = {
   HIGH: "HIGH confidence: sufficient matchup tracking data available for this player.",
   MEDIUM:
@@ -124,6 +103,30 @@ interface BulkSimulationResult {
 }
 
 const BULK_SIM_COUNT = 1000
+
+// One-click recommendations shown in the empty player card. Names resolve
+// through the same /player search as a typed pick; the id is only used to load
+// the headshot up front (same NBA CDN as PlayerAvatar). Each slot gets a
+// distinct set so A and B don't mirror each other.
+type QuickPick = { id: number; name: string }
+
+const QUICK_PICKS_A: QuickPick[] = [
+  { id: 893, name: "Michael Jordan" },
+  { id: 977, name: "Kobe Bryant" },
+  { id: 201939, name: "Stephen Curry" },
+  { id: 947, name: "Allen Iverson" },
+  { id: 77142, name: "Magic Johnson" },
+  { id: 2548, name: "Dwyane Wade" },
+]
+
+const QUICK_PICKS_B: QuickPick[] = [
+  { id: 2544, name: "LeBron James" },
+  { id: 201142, name: "Kevin Durant" },
+  { id: 203507, name: "Giannis Antetokounmpo" },
+  { id: 1449, name: "Larry Bird" },
+  { id: 165, name: "Hakeem Olajuwon" },
+  { id: 406, name: "Shaquille O'Neal" },
+]
 
 interface PlayerSlotProps {
   label: SlotLabel
@@ -265,7 +268,7 @@ function PlayerSelectionController() {
       <div className="mb-6 flex flex-col gap-4 border-b pb-6 md:flex-row md:items-end md:justify-between">
         <div className="space-y-1">
           <div className="text-sm font-medium text-muted-foreground">
-            ISO Simulator
+            IsoLab
           </div>
           <h1 className="text-3xl font-bold tracking-tight">
             Stage a 1v1 matchup
@@ -317,7 +320,7 @@ function PlayerSelectionController() {
               ) : (
                 <Percent className="h-4 w-4" />
               )}
-              {bulkLoading ? "Running 1,000…" : "Run 1,000 sims"}
+              {bulkLoading ? "Running 1,000…" : "Run 1,000 games"}
             </Button>
           </div>
         </div>
@@ -438,16 +441,6 @@ function PlayerSlot({
   onSeasonStatsChange,
   confidenceTier,
 }: PlayerSlotProps) {
-  const [query, setQuery] = useState("")
-  const [suggestionsOpen, setSuggestionsOpen] = useState(false)
-  const searchContainerRef = useRef<HTMLDivElement>(null)
-  const { player, loading, error, searchPlayer, clearPlayer } = usePlayerSearch()
-  const {
-    suggestions,
-    loading: suggestionsLoading,
-    searchSuggestions,
-    clearSuggestions,
-  } = usePlayerSuggestions()
   const {
     seasons,
     loading: seasonsLoading,
@@ -462,8 +455,13 @@ function PlayerSlot({
     loadSeasonStats,
     clearSeasonStats,
   } = usePlayerSeasonStats()
+  const { searchPlayer } = usePlayerSearch()
+  // Name of the quick-pick currently being resolved, so its chip can show a
+  // spinner (the rest are disabled while one is in flight).
+  const [resolvingPick, setResolvingPick] = useState<string | null>(null)
+  const quickPicks = label === "Player A" ? QUICK_PICKS_A : QUICK_PICKS_B
 
-  const profile = selectedPlayer ?? player
+  const profile = selectedPlayer
 
   // Team branding follows the selected season: the card accent color, the logo
   // on the headshot, and the team badge all reflect who the player suited up
@@ -472,44 +470,17 @@ function PlayerSlot({
   const seasonTeamLogo = getTeamLogoUrl(seasonStats?.team_id)
   const seasonTeam = seasonStats?.team_abbreviation || null
 
-  // Debounced type-ahead: fetch suggestions 300ms after the last keystroke.
-  useEffect(() => {
-    const trimmed = query.trim()
-    if (!trimmed) {
-      clearSuggestions()
-      return
-    }
-    const handle = setTimeout(() => searchSuggestions(trimmed), 300)
-    return () => clearTimeout(handle)
-  }, [query, searchSuggestions, clearSuggestions])
-
-  // The results float beneath the input, so close them on any outside click.
-  useEffect(() => {
-    function handlePointerDown(event: MouseEvent) {
-      if (
-        searchContainerRef.current &&
-        !searchContainerRef.current.contains(event.target as Node)
-      ) {
-        setSuggestionsOpen(false)
-      }
-    }
-    document.addEventListener("mousedown", handlePointerDown)
-    return () => document.removeEventListener("mousedown", handlePointerDown)
-  }, [])
-
   // Bubble the loaded season stats up to the parent so TendencyComparisonPanel
   // can read them without re-fetching. onSeasonStatsChange is a stable setter.
   useEffect(() => {
     onSeasonStatsChange?.(seasonStats)
   }, [seasonStats, onSeasonStatsChange])
 
-  // Confirm a freshly searched player: close the suggestions dropdown, load the
-  // player's seasons, then default the selection to the most recent one (the
-  // list is returned newest-first) so the matchup is runnable immediately. The
-  // user can still pick a different season from the dropdown.
+  // Confirm a player picked from the combobox: load the player's seasons, then
+  // default the selection to the most recent one (the list is returned
+  // newest-first) so the matchup is runnable immediately. The user can still
+  // pick a different season from the dropdown.
   async function confirmPlayer(result: PlayerProfile) {
-    setSuggestionsOpen(false)
-    clearSuggestions()
     onSelect(result)
     clearSeasonStats()
     const loadedSeasons = await loadSeasons(result.player_id)
@@ -520,23 +491,23 @@ function PlayerSlot({
     }
   }
 
-  async function handleSelectSuggestion(suggestion: PlayerSuggestion) {
-    setSuggestionsOpen(false)
-    setQuery("")
-    clearSuggestions()
-    const result = await searchPlayer(suggestion.full_name)
-    if (result) {
-      await confirmPlayer(result)
+  // A quick-pick resolves the name to a full profile, then runs the same
+  // confirm flow as a search selection (load seasons + most-recent stats).
+  async function quickPick(name: string) {
+    setResolvingPick(name)
+    try {
+      const result = await searchPlayer(name)
+      if (result) {
+        await confirmPlayer(result)
+      }
+    } finally {
+      setResolvingPick(null)
     }
   }
 
   function handleClear() {
-    clearPlayer()
     clearSeasons()
     clearSeasonStats()
-    clearSuggestions()
-    setSuggestionsOpen(false)
-    setQuery("")
     onClear()
     onSeasonSelect(null)
   }
@@ -682,83 +653,91 @@ function PlayerSlot({
           )}
         </div>
       ) : (
-        <div className="flex flex-1 flex-col gap-4 p-4">
-          {/* The field itself is the cmdk search input; results float directly
-              beneath it. shouldFilter is off because the backend already filters
-              and ranks — cmdk just renders and keyboard-navigates the results. */}
-          <div ref={searchContainerRef} className="relative">
-            <CommandPrimitive
-              shouldFilter={false}
-              className="overflow-visible bg-transparent"
-            >
-              <div className="flex h-9 items-center gap-2 rounded-md border bg-background px-3 shadow-sm focus-within:ring-1 focus-within:ring-ring">
-                <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <CommandPrimitive.Input
-                  value={query}
-                  onValueChange={(value) => {
-                    setQuery(value)
-                    setSuggestionsOpen(value.trim() !== "")
-                  }}
-                  onFocus={() => {
-                    if (query.trim() !== "") {
-                      setSuggestionsOpen(true)
-                    }
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape") {
-                      setSuggestionsOpen(false)
-                    }
-                  }}
-                  placeholder={`Search ${label}…`}
-                  aria-label={`Search ${label}`}
-                  className="flex h-9 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+        <div className="flex flex-1 flex-col gap-3 p-4">
+          {/* Top half: click-to-open search combobox (backend-ranked,
+              keyboard-navigable). */}
+          <PlayerSearchCombobox
+            onSelect={confirmPlayer}
+            align="center"
+            contentClassName="w-[min(20rem,var(--radix-popover-trigger-width))]"
+            trigger={
+              <button
+                type="button"
+                aria-label={`Select ${label}`}
+                className="flex flex-1 flex-col items-center justify-center gap-2 rounded-md border border-dashed text-sm text-muted-foreground transition-colors hover:border-solid hover:bg-muted/50"
+              >
+                <UserRound className="h-8 w-8 opacity-40" />
+                Select {label}
+              </button>
+            }
+          />
+          {/* Bottom half: one-click recommendations as a grid of headshot
+              tiles — same confirm flow as a typed pick, just pre-named. */}
+          <div className="flex flex-1 flex-col gap-2.5">
+            <span className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              <Sparkles className="h-3 w-3" />
+              Quick picks
+            </span>
+            <div className="grid flex-1 grid-cols-3 content-start gap-2">
+              {quickPicks.map((pick) => (
+                <QuickPickTile
+                  key={pick.id}
+                  pick={pick}
+                  resolving={resolvingPick === pick.name}
+                  disabled={resolvingPick !== null}
+                  onSelect={() => quickPick(pick.name)}
                 />
-                {(loading || suggestionsLoading) && (
-                  <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
-                )}
-              </div>
-
-              {suggestionsOpen && query.trim() !== "" && (
-                <CommandList className="absolute left-0 right-0 top-full z-50 mt-1 max-h-64 overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
-                  {suggestionsLoading && suggestions.length === 0 ? (
-                    <div className="flex items-center justify-center gap-2 py-4 text-sm text-muted-foreground">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Searching…
-                    </div>
-                  ) : suggestions.length === 0 ? (
-                    <CommandEmpty>No players found.</CommandEmpty>
-                  ) : (
-                    <CommandGroup className="p-0">
-                      {suggestions.map((suggestion) => (
-                        <CommandItem
-                          key={suggestion.id}
-                          value={`${suggestion.full_name}__${suggestion.id}`}
-                          onSelect={() => handleSelectSuggestion(suggestion)}
-                        >
-                          {suggestion.full_name}
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                  )}
-                </CommandList>
-              )}
-            </CommandPrimitive>
-          </div>
-
-          {error && (
-            <Alert variant="destructive">
-              <AlertTriangle className="h-4 w-4" />
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-
-          <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-md border border-dashed text-sm text-muted-foreground">
-            <UserRound className="h-8 w-8 opacity-40" />
-            No player selected
+              ))}
+            </div>
           </div>
         </div>
       )}
     </div>
+  )
+}
+
+// A one-click recommendation tile, using the same translucent tile treatment as
+// the vitals/stat tiles so it reads as part of the card, not a separate widget.
+function QuickPickTile({
+  pick,
+  resolving,
+  disabled,
+  onSelect,
+}: {
+  pick: QuickPick
+  resolving: boolean
+  disabled: boolean
+  onSelect: () => void
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onSelect}
+      aria-label={`Quick pick ${pick.name}`}
+      className="flex flex-col items-center gap-1.5 rounded-md bg-background/70 p-2 text-center shadow-sm ring-1 ring-border transition-colors hover:bg-muted/50 disabled:opacity-50 disabled:hover:bg-background/70"
+    >
+      <div className="relative">
+        <Avatar className="h-11 w-11 rounded-md border bg-muted">
+          <AvatarImage
+            src={`https://cdn.nba.com/headshots/nba/latest/1040x760/${pick.id}.png`}
+            alt={pick.name}
+            className="object-cover object-top"
+          />
+          <AvatarFallback className="rounded-md text-xs font-semibold">
+            {getInitials(pick.name)}
+          </AvatarFallback>
+        </Avatar>
+        {resolving && (
+          <span className="absolute inset-0 flex items-center justify-center rounded-md bg-background/70">
+            <Loader2 className="h-4 w-4 animate-spin" />
+          </span>
+        )}
+      </div>
+      <span className="line-clamp-2 text-[11px] font-medium leading-tight">
+        {pick.name}
+      </span>
+    </button>
   )
 }
 
@@ -951,9 +930,17 @@ function StatTile({ label, value }: { label: string; value: string }) {
   )
 }
 
-function PlayerAvatar({ playerId, name }: { playerId: number; name: string }) {
+function PlayerAvatar({
+  playerId,
+  name,
+  className,
+}: {
+  playerId: number
+  name: string
+  className?: string
+}) {
   return (
-    <Avatar className="h-14 w-14 shrink-0 rounded-md border bg-muted">
+    <Avatar className={cn("h-14 w-14 shrink-0 rounded-md border bg-muted", className)}>
       <AvatarImage
         src={`https://cdn.nba.com/headshots/nba/latest/1040x760/${playerId}.png`}
         alt={name}
@@ -1440,63 +1427,16 @@ function ZoneChip({
 
 // Exported for reuse by the GOAT Bracket series drill-down.
 export function PlayByPlayView({ playByPlay }: { playByPlay: PlayByPlay[] }) {
-  // Reveal possessions one at a time. A new result (new array reference) resets
-  // the reveal so each simulation animates from the beginning (AC-ISO-003.4).
-  const [visibleCount, setVisibleCount] = useState(0)
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  function stopInterval() {
-    if (intervalRef.current !== null) {
-      clearInterval(intervalRef.current)
-      intervalRef.current = null
-    }
-  }
-
-  useEffect(() => {
-    setVisibleCount(0)
-    stopInterval()
-
-    if (playByPlay.length === 0) {
-      return
-    }
-
-    intervalRef.current = setInterval(() => {
-      setVisibleCount((count) => {
-        const next = count + 1
-        if (next >= playByPlay.length) {
-          stopInterval()
-        }
-        return Math.min(next, playByPlay.length)
-      })
-    }, PLAY_BY_PLAY_TICK_MS)
-
-    return stopInterval
-  }, [playByPlay])
-
-  function skipAnimation() {
-    stopInterval()
-    setVisibleCount(playByPlay.length)
-  }
-
-  const animating = visibleCount < playByPlay.length
-  const visiblePlays = playByPlay.slice(0, visibleCount)
-
   return (
     <Card className="flex flex-col rounded-lg">
       <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
         <CardTitle className="text-sm font-medium text-muted-foreground">
           Play-by-play
         </CardTitle>
-        {animating && (
-          <Button variant="ghost" size="sm" onClick={skipAnimation}>
-            <FastForward className="h-4 w-4" />
-            Skip animation
-          </Button>
-        )}
       </CardHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col">
-        <div className="min-h-[20rem] flex-1 space-y-2 overflow-y-auto pr-1 xl:min-h-0">
-          {visiblePlays.map((play) => (
+        <div className="scrollbar-hide min-h-[20rem] flex-1 space-y-2 overflow-y-auto pr-1 xl:min-h-0">
+          {playByPlay.map((play) => (
             <div
               key={play.possession}
               className="grid grid-cols-[2.5rem_1fr_auto] items-center gap-3 rounded-md border p-3 text-sm"

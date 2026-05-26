@@ -2,12 +2,12 @@ import { useEffect, useState } from "react"
 import { AlertTriangle, Loader2 } from "lucide-react"
 
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { ShotZone, useShotChart } from "@/hooks/useShotChart"
 
@@ -17,11 +17,12 @@ export interface ShotChartTarget {
   seasonId: string
 }
 
-// ShotChartSheet (Tendency Explorer). A side sheet that renders a season-scoped
-// shot chart: a half-court diagram whose zone markers encode attempt frequency
-// (marker size) and efficiency (color gradient). It fetches lazily via
-// useShotChart on open (ADR-002) — never at panel mount — and renders a data
-// warning rather than an empty/broken chart for pre-tracking-era seasons.
+// ShotChartSheet (Tendency Explorer). A centered modal that renders a
+// season-scoped shot chart: a half-court diagram whose zone markers encode
+// attempt frequency (marker size) and efficiency (color gradient). It fetches
+// lazily via useShotChart on open (ADR-002) — never at panel mount — and
+// renders a data warning rather than an empty/broken chart for pre-tracking-era
+// seasons.
 export default function ShotChartSheet({
   target,
   onOpenChange,
@@ -44,16 +45,16 @@ export default function ShotChartSheet({
   }, [target, fetch, reset])
 
   return (
-    <Sheet open={target !== null} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-lg">
-        <SheetHeader>
-          <SheetTitle>{target ? target.playerName : "Shot chart"}</SheetTitle>
-          <SheetDescription>
+    <Dialog open={target !== null} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{target ? target.playerName : "Shot chart"}</DialogTitle>
+          <DialogDescription>
             {target ? `${target.seasonId} season shot chart` : "Shot chart"}
-          </SheetDescription>
-        </SheetHeader>
+          </DialogDescription>
+        </DialogHeader>
 
-        <div className="px-4 pb-6">
+        <div>
           {loading ? (
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" />
@@ -71,8 +72,8 @@ export default function ShotChartSheet({
             <ShotChartCourt zones={data.zones} />
           ) : null}
         </div>
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   )
 }
 

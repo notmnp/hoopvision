@@ -16,11 +16,9 @@ import { useTheme } from "@/components/ui/theme-provider"
 import { cn } from "@/lib/utils"
 
 const NAV_ITEMS = [
-  { to: "/live", label: "Live Scores" },
-  { to: "/simulate", label: "Simulator" },
+  { to: "/simulate", label: "IsoLab" },
   { to: "/bracket", label: "GOAT Bracket" },
-  { to: "/teams", label: "Teams" },
-  { to: "/predictions", label: "Predictions" },
+  { to: "/live", label: "Live Scores" },
 ]
 
 export function Navbar() {

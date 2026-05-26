@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import unquote
 
-from fastapi import FastAPI, HTTPException
+import requests
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from nba_api.stats.static import players
@@ -535,6 +536,43 @@ NBA_LIVE_HEADERS = {
 }
 
 
+NBA_HEADSHOT_URL = "https://cdn.nba.com/headshots/nba/latest/1040x760/{player_id}.png"
+
+
+# Defined as a sync `def` (not `async def`) so FastAPI runs the blocking
+# requests.get in a worker thread rather than stalling the event loop.
+@app.get("/headshot/{player_id}", tags=["nba"])
+def get_headshot(player_id: int):
+    # Proxy the NBA CDN headshot through our own (CORS-enabled) origin. The CDN
+    # sends no Access-Control-Allow-Origin, so a crossOrigin="anonymous" <img>
+    # — which the bracket PNG export needs so html2canvas's canvas isn't
+    # tainted — can't load it directly. Serving the bytes here means the browser
+    # can both display the photo and read its pixels for export.
+    try:
+        upstream = requests.get(
+            NBA_HEADSHOT_URL.format(player_id=player_id),
+            headers=NBA_LIVE_HEADERS,
+            timeout=10,
+        )
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch headshot: {e}")
+    if upstream.status_code != 200:
+        raise HTTPException(status_code=404, detail="Headshot not found")
+    return Response(
+        content=upstream.content,
+        media_type=upstream.headers.get("Content-Type", "image/png"),
+        # `Vary: Origin` MUST be set on every response, not just CORS ones.
+        # CORSMiddleware only adds it when an `Origin` header is present, so a
+        # non-CORS request (a plain `<img>` without crossOrigin, a prefetch, or
+        # opening the URL directly) gets a cacheable response with NO `Vary` and
+        # NO `Access-Control-Allow-Origin`. The browser then reuses that poisoned
+        # cache entry for a later `crossOrigin="anonymous"` <img>, which fails the
+        # CORS check and breaks the headshot. Setting it here keeps the CORS and
+        # non-CORS variants from ever sharing a cache entry.
+        headers={"Cache-Control": "public, max-age=86400", "Vary": "Origin"},
+    )
+
+
 @app.get("/scoreboard", tags=["nba"])
 async def get_today_scoreboard():
     try:
@@ -609,6 +647,11 @@ class CreateBracketResponse(BaseModel):
 
 @app.post("/bracket", tags=["bracket"], response_model=CreateBracketResponse)
 async def create_bracket(config: BracketConfig):
+    # Backfill any missing display names from the static player index so the
+    # bracket view can label every participant (and advancing winner) by name.
+    for participant in config.participants:
+        if not participant.name:
+            participant.name = _player_name_from_id(participant.player_id)
     try:
         state = bracket_orchestrator.create_bracket(config)
     except BracketValidationError as e:

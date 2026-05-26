@@ -45,6 +45,10 @@ class BracketParticipant(BaseModel):
     player_id: int
     season_id: str
     seed: int
+    # The player's display name. Optional on input (older clients omit it); the
+    # API backfills it from the static player index at creation so the bracket
+    # view can label participants without a separate name lookup.
+    name: str | None = None
 
 
 class BracketConfig(BaseModel):
@@ -103,20 +107,20 @@ class _BracketSession:
 CURATED_GREATS: list[tuple[str, str]] = [
     ("Michael Jordan", "1995-96"),
     ("LeBron James", "2012-13"),
+    ("Stephen Curry", "2015-16"),
     ("Kareem Abdul-Jabbar", "1971-72"),
-    ("Magic Johnson", "1986-87"),
+    ("Kevin Durant", "2013-14"),
     ("Tim Duncan", "2002-03"),
-    ("Larry Bird", "1985-86"),
-    ("Wilt Chamberlain", "1966-67"),
+    ("Giannis Antetokounmpo", "2019-20"),
+    ("Magic Johnson", "1986-87"),
+    ("Nikola Jokic", "2023-24"),
     ("Shaquille O'Neal", "1999-00"),
     ("Kobe Bryant", "2005-06"),
-    ("Bill Russell", "1961-62"),
+    ("Larry Bird", "1985-86"),
+    ("Luka Doncic", "2023-24"),
     ("Hakeem Olajuwon", "1993-94"),
-    ("Stephen Curry", "2015-16"),
-    ("Kevin Durant", "2013-14"),
-    ("Oscar Robertson", "1963-64"),
-    ("Dirk Nowitzki", "2006-07"),
-    ("Giannis Antetokounmpo", "2019-20"),
+    ("Joel Embiid", "2022-23"),
+    ("Wilt Chamberlain", "1966-67"),
 ]
 
 SUPPORTED_BRACKET_SIZES = (4, 8, 16)
@@ -151,7 +155,10 @@ def default_bracket_config(
             )
         participants.append(
             BracketParticipant(
-                player_id=player_id, season_id=season_id, seed=index + 1
+                player_id=player_id,
+                season_id=season_id,
+                seed=index + 1,
+                name=name,
             )
         )
 
