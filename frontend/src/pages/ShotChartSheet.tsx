@@ -48,15 +48,17 @@ export default function ShotChartSheet({
     <Dialog open={target !== null} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{target ? target.playerName : "Shot chart"}</DialogTitle>
-          <DialogDescription>
+          <DialogTitle className="font-display text-2xl font-black uppercase tracking-tight">
+            {target ? target.playerName : "Shot chart"}
+          </DialogTitle>
+          <DialogDescription className="font-mono text-[0.65rem] uppercase tracking-wider text-muted-foreground">
             {target ? `${target.seasonId} season shot chart` : "Shot chart"}
           </DialogDescription>
         </DialogHeader>
 
         <div>
           {loading ? (
-            <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+            <div className="flex items-center justify-center gap-2 py-16 font-mono text-xs uppercase tracking-wider text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" />
               Loading shot chart…
             </div>
@@ -134,12 +136,12 @@ function ShotChartCourt({ zones }: { zones: ShotZone[] }) {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
+      <div className="flex items-center justify-between font-mono text-[0.65rem] uppercase tracking-wider text-muted-foreground">
         <span>Marker size = attempts · color = FG%</span>
         <span className="tabular-nums">{totalAttempts} FGA</span>
       </div>
 
-      <div className="overflow-hidden rounded-md border bg-muted/20">
+      <div className="overflow-hidden rounded-2xl border bg-muted/20">
         <svg viewBox="0 0 500 470" className="h-auto w-full">
           <CourtLines />
           {positioned.map((zone) => {
@@ -189,27 +191,37 @@ function ShotChartCourt({ zones }: { zones: ShotZone[] }) {
 function ZoneDetail({ zone }: { zone: ShotZone | null }) {
   if (!zone) {
     return (
-      <div className="rounded-md border bg-background/60 px-3 py-2 text-xs text-muted-foreground">
+      <div className="rounded-2xl border bg-background/60 px-3 py-2 font-mono text-[0.65rem] uppercase tracking-wider text-muted-foreground">
         Hover or tap a zone to see attempts and field-goal percentage.
       </div>
     )
   }
   return (
-    <div className="flex items-center justify-between rounded-md border bg-background/60 px-3 py-2 text-sm">
+    <div className="flex items-center justify-between rounded-2xl border bg-background/60 px-3 py-2 text-sm">
       <div>
-        <div className="font-medium">{zone.zone_label}</div>
-        <div className="text-xs text-muted-foreground">{zone.zone_area}</div>
+        <div className="font-display text-lg font-bold uppercase tracking-tight leading-none">
+          {zone.zone_label}
+        </div>
+        <div className="mt-1 font-mono text-[0.6rem] uppercase tracking-wider text-muted-foreground">
+          {zone.zone_area}
+        </div>
       </div>
-      <div className="flex items-center gap-4 tabular-nums">
+      <div className="flex items-center gap-4">
         <div className="text-right">
-          <div className="text-xs text-muted-foreground">Made / Att</div>
-          <div className="font-semibold">
+          <div className="font-mono text-[0.6rem] uppercase tracking-wider text-muted-foreground">
+            Made / Att
+          </div>
+          <div className="font-mono text-sm font-medium tabular-nums">
             {zone.made} / {zone.attempts}
           </div>
         </div>
         <div className="text-right">
-          <div className="text-xs text-muted-foreground">FG%</div>
-          <div className="font-semibold">{formatPct(zone.fg_pct)}</div>
+          <div className="font-mono text-[0.6rem] uppercase tracking-wider text-muted-foreground">
+            FG%
+          </div>
+          <div className="font-mono text-sm font-medium tabular-nums">
+            {formatPct(zone.fg_pct)}
+          </div>
         </div>
       </div>
     </div>

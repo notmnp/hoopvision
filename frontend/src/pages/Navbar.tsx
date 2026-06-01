@@ -42,8 +42,8 @@ export function Navbar() {
               to={item.to}
               className={({ isActive }) =>
                 cn(
-                  "rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-                  isActive && "text-foreground"
+                  "rounded-md px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+                  isActive && "text-amber-600 dark:text-amber-400"
                 )
               }
             >
@@ -76,8 +76,8 @@ export function Navbar() {
                       to={item.to}
                       className={({ isActive }) =>
                         cn(
-                          "rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-                          isActive && "bg-accent text-foreground"
+                          "rounded-md px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+                          isActive && "bg-accent text-amber-600 dark:text-amber-400"
                         )
                       }
                     >

@@ -137,6 +137,9 @@
   .marquee-track {
     animation: none !important;
   }
+  [class*="animate-in"] {
+    animation: none !important;
+  }
 }
 
 /* Hide the scrollbar while keeping the element scrollable. */

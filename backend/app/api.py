@@ -146,6 +146,9 @@ class PlayerSeasonStats(BaseModel):
     rebound_per_game: float
     block_per_game: float
     steal_per_game: float
+    personal_foul_per_game: float
+    true_shooting_pct: float
+    free_throw_pct: float
 
 
 def _normalize_name(name: str) -> str:

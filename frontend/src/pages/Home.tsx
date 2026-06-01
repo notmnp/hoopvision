@@ -192,7 +192,7 @@ function PlayerColumn({
             src={HEADSHOT(player.id)}
             className="object-cover object-top"
           />
-          <AvatarFallback className="rounded-lg text-xs font-semibold">
+          <AvatarFallback className="rounded-lg text-xs font-medium">
             {player.initials}
           </AvatarFallback>
         </Avatar>
@@ -402,7 +402,7 @@ const Home = () => {
                     <mode.icon className="h-5 w-5" />
                   </div>
                   {mode.live ? (
-                    <span className="inline-flex items-center gap-1.5 rounded bg-red-600 px-2 py-0.5 font-mono text-[0.6rem] font-bold uppercase tracking-wider text-white">
+                    <span className="inline-flex items-center gap-1.5 rounded bg-red-600 px-2 py-0.5 font-mono text-[0.6rem] font-medium uppercase tracking-wider text-white">
                       <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
                       Live
                     </span>
