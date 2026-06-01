@@ -164,6 +164,33 @@ NBA_STATS_CACHE_TTL_SECONDS
 
 Defaults are defined in `backend/app/nba_stats_client.py`.
 
+## Environment Variables
+
+Hoopvision deploys as a single Vercel project that serves both the Vite
+frontend and the FastAPI backend, with all API calls routed under the relative
+`/api` prefix. Because of that single-project, same-origin design, the only
+required production variables are the Vercel KV credentials.
+
+| Variable | Required | Default | Notes |
+|---|---|---|---|
+| `KV_REST_API_URL` | Yes (production) | — | Upstash Redis REST URL for bracket session persistence. Auto-injected by Vercel when a KV store is connected. |
+| `KV_REST_API_TOKEN` | Yes (production) | — | Upstash Redis REST token. Auto-injected by Vercel when a KV store is connected. |
+| `BULK_SIM_MAX_N` | No | `1000` | Upper bound on `POST /api/simulate/bulk` count. Lower to `200` if bulk simulations time out on the Hobby plan. |
+| `CORS_ORIGINS` | No | `http://localhost:5173` | Comma-separated allowed origins. The default covers local development; not needed in production since requests are same-origin. |
+
+`VITE_API_BASE_URL` is **not** required: the frontend defaults to the relative
+`/api` base, which is same-origin in production and proxied to
+`http://localhost:8000` by the Vite dev server locally.
+
+If `KV_REST_API_URL` / `KV_REST_API_TOKEN` are unset, the server still starts;
+only the bracket endpoints return a clear `500` until KV is connected.
+
+### Provisioning Vercel KV (one-time)
+
+1. Open the Vercel project → **Storage** → **Connect Store** → **Create KV Store**.
+2. Vercel auto-injects `KV_REST_API_URL` and `KV_REST_API_TOKEN`; confirm they
+   appear under **Settings → Environment Variables**.
+
 ## Known Limitations
 
 - `stats.nba.com` may throttle, hang, or block requests depending on headers,
