@@ -72,9 +72,18 @@ class MatchupDataService:
         self,
         player_id: int,
         height_bucket: str,
+        seasons: list[int] | None = None,
     ) -> MatchupConditionedStats:
         normalized_bucket = self._normalize_height_bucket(height_bucket)
-        matchup_rows, active_seasons = self._fetch_tracking_matchups(player_id)
+        # seasons=None aggregates every tracking-era season — used by offline
+        # training, which wants the full career sample. Live inference passes a
+        # single [season], so a cold request issues ~3 upstream calls total
+        # instead of ~3 per tracking season (~13x fewer, avoids timeouts).
+        # `is not None` (not truthiness) so an explicit [] means "no seasons".
+        target_seasons = seasons if seasons is not None else self._tracking_seasons()
+        matchup_rows, active_seasons = self._fetch_tracking_matchups(
+            player_id, target_seasons
+        )
         if not matchup_rows:
             return self._empty_stats(normalized_bucket)
 
@@ -131,11 +140,11 @@ class MatchupDataService:
         )
 
     def _fetch_tracking_matchups(
-        self, player_id: int
+        self, player_id: int, seasons: list[int]
     ) -> tuple[list[dict[str, Any]], list[int]]:
         rows: list[dict[str, Any]] = []
         active_seasons: list[int] = []
-        for season in self._tracking_seasons():
+        for season in seasons:
             data = fetch_stats_data(
                 f"leagueseasonmatchups:{season}:{player_id}",
                 lambda season=season: leagueseasonmatchups.LeagueSeasonMatchups(

@@ -158,6 +158,55 @@ class MatchupDataServiceTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "height_bucket"):
             self.service.get_matchup_stats(203999, "forward")
 
+    def test_seasons_arg_scopes_fetches_to_only_those_seasons(self):
+        # _tracking_seasons returns a different year; the explicit seasons= arg
+        # must override it so nothing outside the requested season is fetched.
+        with patch.object(MatchupDataService, "_tracking_seasons", return_value=[9999]):
+            self.responses = {
+                "leagueseasonmatchups:2023:777": {
+                    "SeasonMatchups": [
+                        {"DEF_PLAYER_ID": 10, "PARTIAL_POSS": 60, "MATCHUP_FGA": 20},
+                    ]
+                },
+                "leaguedashplayerbiostats:2023": {
+                    "LeagueDashPlayerBioStats": [
+                        {"PLAYER_ID": 10, "PLAYER_HEIGHT_INCHES": 78},
+                    ]
+                },
+                "shotchartdetail:2023:777": {"Shot_Chart_Detail": []},
+            }
+
+            stats = self.service.get_matchup_stats(777, "wing", seasons=[2023])
+
+        self.assertEqual(stats.possession_count, 60)
+        # Only 2023 keys were requested; the 9999 _tracking_seasons value was ignored.
+        self.assertFalse(any("9999" in key for key in self.requested_keys))
+        self.assertIn("leagueseasonmatchups:2023:777", self.requested_keys)
+
+    def test_seasons_none_defaults_to_all_tracking_seasons(self):
+        # Guards the offline-training path: no seasons arg fans out across the
+        # full tracking range.
+        with patch.object(
+            MatchupDataService, "_tracking_seasons", return_value=[2022, 2023, 2024]
+        ):
+            self.responses = {
+                f"leagueseasonmatchups:{year}:777": {"SeasonMatchups": []}
+                for year in (2022, 2023, 2024)
+            }
+
+            self.service.get_matchup_stats(777, "wing")
+
+        for year in (2022, 2023, 2024):
+            self.assertIn(f"leagueseasonmatchups:{year}:777", self.requested_keys)
+
+    def test_empty_seasons_list_issues_no_fetch(self):
+        # [] is explicit "no seasons" (distinct from None) -> zero upstream calls.
+        with patch.object(MatchupDataService, "_tracking_seasons", return_value=[2024]):
+            stats = self.service.get_matchup_stats(777, "wing", seasons=[])
+
+        self.assertEqual(self.requested_keys, [])
+        self.assertEqual(stats.possession_count, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

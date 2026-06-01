@@ -33,7 +33,7 @@ CAREER_ROWS = [
 
 
 class StubMatchupService:
-    def get_matchup_stats(self, player_id, height_bucket):
+    def get_matchup_stats(self, player_id, height_bucket, seasons=None):
         possessions = {
             "guard": 80,
             "wing": 72,

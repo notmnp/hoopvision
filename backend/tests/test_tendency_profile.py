@@ -47,8 +47,8 @@ class StubMatchupService:
         self.stats = stats
         self.calls = []
 
-    def get_matchup_stats(self, player_id, height_bucket):
-        self.calls.append((player_id, height_bucket))
+    def get_matchup_stats(self, player_id, height_bucket, seasons=None):
+        self.calls.append((player_id, height_bucket, seasons))
         return self.stats or MatchupConditionedStats(
             sufficient_sample=False,
             possession_count=0,
@@ -206,7 +206,8 @@ class TendencyProfileBuilderTest(unittest.TestCase):
             player_id=203999, height_bucket="guard", season_id="2023-24"
         )
 
-        self.assertEqual(matchup_service.calls, [(203999, "guard")])
+        # Observed data is scoped to the selected season (2023-24 -> 2023).
+        self.assertEqual(matchup_service.calls, [(203999, "guard", [2023])])
         self.assertEqual(profile.confidence_tier, "HIGH")
         self.assertEqual(profile.matchup_possession_count, 100)
         self.assertEqual(profile.observed_blend_weight, 0.5)

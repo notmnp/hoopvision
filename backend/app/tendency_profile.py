@@ -184,9 +184,15 @@ class TendencyProfileBuilder:
         observed_stats = None
         if post_tracking_player:
             try:
+                # Scope observed data to the selected season only. season_year is
+                # guaranteed non-None here by the post_tracking_player guard
+                # above (keep this call inside that guard). Aggregating every
+                # tracking season would issue ~13x more throttled upstream calls
+                # per player and time out on cold serverless starts.
                 observed_stats = self.matchup_service.get_matchup_stats(
                     player_id,
                     height_bucket,
+                    seasons=[season_year],
                 )
             except Exception as error:
                 data_warnings.append(
