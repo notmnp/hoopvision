@@ -102,15 +102,19 @@ http://127.0.0.1:8000
 Useful endpoints:
 
 ```text
-GET  /player/{name}
-GET  /scoreboard
-POST /simulate
+GET  /api/player/{name}
+GET  /api/scoreboard
+POST /api/simulate
 ```
+
+All routes are mounted under the `/api` prefix. In local development the Vite
+dev server proxies `/api/*` to the backend, so the frontend needs no
+`VITE_API_BASE_URL` (it defaults to `/api`).
 
 Example:
 
 ```sh
-curl "http://127.0.0.1:8000/player/Kyrie%20Irving"
+curl "http://127.0.0.1:8000/api/player/Kyrie%20Irving"
 ```
 
 ## Frontend Setup
