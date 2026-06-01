@@ -7,9 +7,14 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
     "nba_api>=1.5.0",
-    "joblib>=1.4.0",
-    "numpy>=1.26.0",
-    "scikit-learn>=1.5.0",
     "requests>=2.31.0",
     "upstash-redis>=1.1.0",
+    # The tendency model artifact is pickled with this exact ML stack. These
+    # MUST stay pinned: a newer scikit-learn cannot unpickle the committed
+    # GradientBoostingRegressor (raises AttributeError on sklearn internals).
+    # Re-pin to match whenever the artifact is retrained.
+    "scikit-learn==1.5.0",
+    "numpy==2.1.3",
+    "scipy==1.15.3",
+    "joblib==1.4.2",
 ]
