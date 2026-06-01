@@ -116,7 +116,7 @@ async function drawBranding(
 
   // Wordmark on top, the page title beneath it (dimmed to read as a subtitle).
   ctx.font = `700 ${21 * scale}px Inter, system-ui, -apple-system, sans-serif`
-  ctx.fillText("HoopVision", textX, y + 19 * scale)
+  ctx.fillText("Hooper", textX, y + 19 * scale)
 
   ctx.globalAlpha = 0.6
   ctx.font = `500 ${15 * scale}px Inter, system-ui, -apple-system, sans-serif`

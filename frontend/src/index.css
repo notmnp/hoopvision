@@ -11,7 +11,7 @@
   --radius-xl: calc(var(--radius) + 4px);
   --font-display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
-  --animate-marquee: marquee 38s linear infinite;
+  --animate-marquee: marquee 60s linear infinite;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);

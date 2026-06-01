@@ -44,14 +44,33 @@ const MATCHUP = {
 
 const TICKER = [
   "Jordan vs. LeBron",
-  "Kobe vs. Durant",
+  "Kobe vs. KD",
   "Magic vs. Bird",
+  "Wilt vs. Russell",
   "Shaq vs. Hakeem",
-  "Curry vs. Pistol Pete",
-  "Wilt vs. Kareem",
-  "Duncan vs. Garnett",
-  "Iverson vs. Stockton",
+  "Embiid vs. Jokić",
+  "Duncan vs. KG",
+  "Zion vs. Barkley",
+  "Curry vs. Nash",
+  "Harden vs. Kawhi",
+  "Westbrook vs. Big O",
+  "Vince vs. T-Mac",
+  "Stockton vs. CP3",
+  "Kyrie vs. Iverson",
+  "SGA vs. D-Wade",
+  "D-Rose vs. Penny",
+  "Giannis vs. Dr. J",
 ]
+
+/** Fisher–Yates shuffle, returning a new array. */
+function shuffle<T>(items: T[]): T[] {
+  const out = [...items]
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[out[i], out[j]] = [out[j], out[i]]
+  }
+  return out
+}
 
 const STATS = [
   { target: 1000, label: "sims per matchup" },
@@ -66,7 +85,7 @@ const MODES = [
     icon: Swords,
     figure: "01",
     title: "ISO Simulator",
-    copy: "Pick any two players, any era. A thousand possessions decide who actually wins.",
+    copy: "Pick any two players, any era. A thousand games decide who actually wins.",
     cta: "Run the matchup",
   },
   {
@@ -220,6 +239,9 @@ function PlayerColumn({
 }
 
 const Home = () => {
+  // Shuffle the rivalry ticker once per page load, kept stable across re-renders.
+  const [ticker] = useState(() => shuffle(TICKER))
+
   return (
     <div className="relative overflow-hidden">
       {/* Court geometry — center circle + three-point arc instead of glow blobs */}
@@ -278,8 +300,8 @@ const Home = () => {
               )}
             >
               Drop any two players on the court, across any era, and let a
-              thousand possessions decide who really wins. Real NBA tendencies,
-              no guesswork.
+              thousand games decide who really wins — every possession scored
+              from real NBA tendencies.
             </p>
 
             <div
@@ -362,7 +384,7 @@ const Home = () => {
         {/* Legendary-matchup ticker */}
         <div className="mt-16 overflow-hidden border-y py-3 [mask-image:linear-gradient(to_right,transparent,black_8%,black_92%,transparent)]">
           <div className="marquee-track flex w-max animate-marquee">
-            {[...TICKER, ...TICKER].map((m, i) => (
+            {[...ticker, ...ticker].map((m, i) => (
               <span
                 key={i}
                 className="flex items-center gap-6 px-6 font-mono text-xs uppercase tracking-[0.16em] text-muted-foreground/60"
