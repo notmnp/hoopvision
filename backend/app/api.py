@@ -1,4 +1,5 @@
 import csv
+import json
 import os
 import re
 from pathlib import Path
@@ -25,9 +26,19 @@ from .bracket import (
     BracketOrchestrator,
     BracketState,
     BracketValidationError,
+    _BracketSession,
     default_bracket_config,
 )
 from .shotchart import shot_chart_service
+
+# Imported defensively: the package ships in production (declared in
+# pyproject.toml) but may be absent in a bare local checkout. A missing module
+# must NOT prevent the server from starting — bracket endpoints simply surface a
+# clear 500 instead (DEPLOY-009). Non-bracket routes are unaffected either way.
+try:
+    from upstash_redis.asyncio import Redis as _UpstashRedis
+except ImportError:  # pragma: no cover - exercised only without the dependency
+    _UpstashRedis = None
 
 app = FastAPI()
 
@@ -642,10 +653,81 @@ async def simulate_bulk(request: BulkSimulationRequest):
 
 # A single orchestrator instance owns the in-process bracket session store
 # (ADR-002). It reuses one SimulationEngine since the engine is stateless beyond
-# its cached profile builder.
+# its cached profile builder. On Vercel the in-process store is destroyed on
+# every cold start, so bracket sessions are persisted to Vercel KV (Upstash
+# Redis) and the orchestrator's `_sessions` dict is used only as a per-request
+# working copy that is hydrated from KV on demand.
 bracket_orchestrator = BracketOrchestrator(
     engine=SimulationEngine(profile_provider=_get_player_profile_by_id)
 )
+
+
+# Bracket sessions live in Vercel KV with a 24h TTL: an untouched bracket is
+# treated as abandoned after one day.
+_BRACKET_KV_TTL_SECONDS = 86400
+
+# Initialized once at module level (not per-request). It is None when the KV
+# credentials are absent (or the client library is unavailable) so the server
+# still starts; bracket endpoints then return a clear 500 (DEPLOY-009).
+_KV_REST_API_URL = os.getenv("KV_REST_API_URL")
+_KV_REST_API_TOKEN = os.getenv("KV_REST_API_TOKEN")
+_kv_redis = (
+    _UpstashRedis(url=_KV_REST_API_URL, token=_KV_REST_API_TOKEN)
+    if _UpstashRedis is not None and _KV_REST_API_URL and _KV_REST_API_TOKEN
+    else None
+)
+
+
+def _require_kv():
+    # Surfaced as HTTP 500 by the bracket endpoints rather than an unhandled
+    # AttributeError on a None client (DEPLOY-009).
+    if _kv_redis is None:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Bracket persistence is unavailable: set KV_REST_API_URL and "
+                "KV_REST_API_TOKEN to enable bracket endpoints."
+            ),
+        )
+    return _kv_redis
+
+
+def _kv_key(bracket_id: str) -> str:
+    return f"bracket:{bracket_id}"
+
+
+async def _kv_save_bracket(
+    bracket_id: str, state: BracketState, possession_mode: str
+) -> None:
+    redis = _require_kv()
+    payload = json.dumps(
+        {"state": state.model_dump(mode="json"), "possession_mode": possession_mode}
+    )
+    await redis.set(_kv_key(bracket_id), payload, ex=_BRACKET_KV_TTL_SECONDS)
+
+
+async def _kv_load_bracket(bracket_id: str) -> tuple[BracketState, str] | None:
+    redis = _require_kv()
+    raw = await redis.get(_kv_key(bracket_id))
+    if raw is None:
+        return None
+    data = json.loads(raw)
+    state = BracketState.model_validate(data["state"])
+    return state, data["possession_mode"]
+
+
+async def _hydrate_session(bracket_id: str) -> str:
+    # Load the persisted bracket from KV and inject it into the orchestrator's
+    # in-process store so the existing get_state/run_round/run_all paths operate
+    # on the durable session even after a cold start. Raises 404 when absent.
+    loaded = await _kv_load_bracket(bracket_id)
+    if loaded is None:
+        raise HTTPException(status_code=404, detail="Bracket not found")
+    state, possession_mode = loaded
+    bracket_orchestrator._sessions[bracket_id] = _BracketSession(
+        state=state, possession_mode=possession_mode
+    )
+    return possession_mode
 
 
 class CreateBracketResponse(BaseModel):
@@ -664,6 +746,7 @@ async def create_bracket(config: BracketConfig):
         state = bracket_orchestrator.create_bracket(config)
     except BracketValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    await _kv_save_bracket(state.bracket_id, state, config.possession_mode)
     return {"bracket_id": state.bracket_id, "bracket_state": state}
 
 
@@ -684,38 +767,42 @@ async def get_default_bracket(size: int):
 
 @router.get("/bracket/{bracket_id}", tags=["bracket"], response_model=BracketState)
 async def get_bracket(bracket_id: str):
-    try:
-        return bracket_orchestrator.get_state(bracket_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Bracket not found")
+    await _hydrate_session(bracket_id)
+    return bracket_orchestrator.get_state(bracket_id)
 
 
 @router.post(
     "/bracket/{bracket_id}/run-round", tags=["bracket"], response_model=BracketState
 )
 async def run_bracket_round(bracket_id: str):
+    possession_mode = await _hydrate_session(bracket_id)
     try:
-        return await bracket_orchestrator.run_round(bracket_id)
+        state = await bracket_orchestrator.run_round(bracket_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="Bracket not found")
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to simulate round: {str(e)}"
         )
+    await _kv_save_bracket(bracket_id, state, possession_mode)
+    return state
 
 
 @router.post(
     "/bracket/{bracket_id}/run-all", tags=["bracket"], response_model=BracketState
 )
 async def run_bracket_all(bracket_id: str):
+    possession_mode = await _hydrate_session(bracket_id)
     try:
-        return await bracket_orchestrator.run_all(bracket_id)
+        state = await bracket_orchestrator.run_all(bracket_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="Bracket not found")
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to simulate bracket: {str(e)}"
         )
+    await _kv_save_bracket(bracket_id, state, possession_mode)
+    return state
 
 
 # Mount every /api route once the router is fully populated.
