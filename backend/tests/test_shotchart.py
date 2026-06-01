@@ -73,7 +73,7 @@ class ShotChartEndpointTest(unittest.TestCase):
             "backend.app.shotchart.fetch_stats_data",
             return_value={"Shot_Chart_Detail": SAMPLE_ROWS},
         ):
-            response = self.client.get("/shotchart/201939/2015-16")
+            response = self.client.get("/api/shotchart/201939/2015-16")
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertTrue(body["available"])
@@ -87,7 +87,7 @@ class ShotChartEndpointTest(unittest.TestCase):
         })
 
     def test_endpoint_pre_tracking_era_warns(self):
-        response = self.client.get("/shotchart/893/1995-96")
+        response = self.client.get("/api/shotchart/893/1995-96")
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertFalse(body["available"])
@@ -99,7 +99,7 @@ class ShotChartEndpointTest(unittest.TestCase):
             "backend.app.shotchart.fetch_stats_data",
             side_effect=RuntimeError("nba down"),
         ):
-            response = self.client.get("/shotchart/201939/2015-16")
+            response = self.client.get("/api/shotchart/201939/2015-16")
         self.assertEqual(response.status_code, 502)
 
 

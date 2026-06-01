@@ -6,7 +6,7 @@ from typing import Any, Literal
 from urllib.parse import unquote
 
 import requests
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import APIRouter, FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from nba_api.stats.static import players
@@ -70,6 +70,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# All routes are mounted under /api so the single-project Vercel deployment can
+# route /api/* to this function while every other path falls back to the SPA.
+# CORS and the app instance stay on `app`; only the routes move to the router.
+router = APIRouter(prefix="/api")
 
 
 PossessionMode = Literal["make_it_take_it", "alternating"]
@@ -425,12 +430,12 @@ def _get_player_profile_by_id(player_id: int) -> dict[str, Any]:
     return _build_player_profile(player_id, player_name, data)
 
 
-@app.get("/", tags=["root"])
+@router.get("/", tags=["root"])
 async def read_root() -> dict:
     return {"message": "Welcome to your NBA API backend."}
 
 
-@app.get(
+@router.get(
     "/players/search",
     tags=["nba"],
     response_model=list[PlayerSearchSuggestion],
@@ -447,7 +452,7 @@ async def search_players(q: str = ""):
     ]
 
 
-@app.get("/player/{name}", tags=["nba"])
+@router.get("/player/{name}", tags=["nba"])
 async def get_player_info(name: str):
     matched_players = _find_player_matches(name)
     if not matched_players:
@@ -469,7 +474,7 @@ async def get_player_info(name: str):
         }
 
 
-@app.get(
+@router.get(
     "/player/{player_id}/seasons",
     tags=["nba"],
     response_model=list[PlayerSeasonOption],
@@ -484,7 +489,7 @@ async def get_player_seasons(player_id: int):
         )
 
 
-@app.get(
+@router.get(
     "/player/{player_id}/season/{season_id}",
     tags=["nba"],
     response_model=PlayerSeasonStats,
@@ -506,7 +511,7 @@ async def get_player_season(player_id: int, season_id: str):
     return stats
 
 
-@app.get(
+@router.get(
     "/shotchart/{player_id}/{season}",
     tags=["nba"],
     response_model=ShotChartResponse,
@@ -544,7 +549,7 @@ NBA_HEADSHOT_URL = "https://cdn.nba.com/headshots/nba/latest/1040x760/{player_id
 
 # Defined as a sync `def` (not `async def`) so FastAPI runs the blocking
 # requests.get in a worker thread rather than stalling the event loop.
-@app.get("/headshot/{player_id}", tags=["nba"])
+@router.get("/headshot/{player_id}", tags=["nba"])
 def get_headshot(player_id: int):
     # Proxy the NBA CDN headshot through our own (CORS-enabled) origin. The CDN
     # sends no Access-Control-Allow-Origin, so a crossOrigin="anonymous" <img>
@@ -576,7 +581,7 @@ def get_headshot(player_id: int):
     )
 
 
-@app.get("/scoreboard", tags=["nba"])
+@router.get("/scoreboard", tags=["nba"])
 async def get_today_scoreboard():
     try:
         games = scoreboard.ScoreBoard(headers=NBA_LIVE_HEADERS)
@@ -587,7 +592,7 @@ async def get_today_scoreboard():
         )
 
 
-@app.post("/simulate", tags=["iso"])
+@router.post("/simulate", tags=["iso"])
 async def simulate_matchup(request: SimulationRequest):
     if request.player_a_id == request.player_b_id:
         raise HTTPException(status_code=400, detail="Players must be different")
@@ -608,7 +613,7 @@ async def simulate_matchup(request: SimulationRequest):
         )
 
 
-@app.post("/simulate/bulk", tags=["iso"], response_model=BulkSimulationResult)
+@router.post("/simulate/bulk", tags=["iso"], response_model=BulkSimulationResult)
 async def simulate_bulk(request: BulkSimulationRequest):
     if request.player_a_id == request.player_b_id:
         raise HTTPException(status_code=400, detail="Players must be different")
@@ -648,7 +653,7 @@ class CreateBracketResponse(BaseModel):
     bracket_state: BracketState
 
 
-@app.post("/bracket", tags=["bracket"], response_model=CreateBracketResponse)
+@router.post("/bracket", tags=["bracket"], response_model=CreateBracketResponse)
 async def create_bracket(config: BracketConfig):
     # Backfill any missing display names from the static player index so the
     # bracket view can label every participant (and advancing winner) by name.
@@ -669,7 +674,7 @@ def _resolve_player_id_by_name(name: str) -> int | None:
     return matches[0]["id"] if matches else None
 
 
-@app.get("/bracket/default/{size}", tags=["bracket"], response_model=BracketConfig)
+@router.get("/bracket/default/{size}", tags=["bracket"], response_model=BracketConfig)
 async def get_default_bracket(size: int):
     try:
         return default_bracket_config(size, _resolve_player_id_by_name)
@@ -677,7 +682,7 @@ async def get_default_bracket(size: int):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.get("/bracket/{bracket_id}", tags=["bracket"], response_model=BracketState)
+@router.get("/bracket/{bracket_id}", tags=["bracket"], response_model=BracketState)
 async def get_bracket(bracket_id: str):
     try:
         return bracket_orchestrator.get_state(bracket_id)
@@ -685,7 +690,7 @@ async def get_bracket(bracket_id: str):
         raise HTTPException(status_code=404, detail="Bracket not found")
 
 
-@app.post(
+@router.post(
     "/bracket/{bracket_id}/run-round", tags=["bracket"], response_model=BracketState
 )
 async def run_bracket_round(bracket_id: str):
@@ -699,7 +704,7 @@ async def run_bracket_round(bracket_id: str):
         )
 
 
-@app.post(
+@router.post(
     "/bracket/{bracket_id}/run-all", tags=["bracket"], response_model=BracketState
 )
 async def run_bracket_all(bracket_id: str):
@@ -711,3 +716,7 @@ async def run_bracket_all(bracket_id: str):
         raise HTTPException(
             status_code=500, detail=f"Failed to simulate bracket: {str(e)}"
         )
+
+
+# Mount every /api route once the router is fully populated.
+app.include_router(router)

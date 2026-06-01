@@ -293,9 +293,9 @@ class SimulateEndpointTest(unittest.TestCase):
         with patch("backend.app.api._fetch_common_player_info") as common_info:
             common_info.side_effect = TimeoutError("stats.nba.com timed out")
 
-            encoded_response = client.get("/player/Michael%2520Jordan")
-            plus_response = client.get("/player/Michael+Jordan")
-            spaced_response = client.get("/player/Michael%20%20%20Jordan")
+            encoded_response = client.get("/api/player/Michael%2520Jordan")
+            plus_response = client.get("/api/player/Michael+Jordan")
+            spaced_response = client.get("/api/player/Michael%20%20%20Jordan")
 
         self.assertEqual(encoded_response.status_code, 200)
         self.assertEqual(plus_response.status_code, 200)
@@ -307,7 +307,7 @@ class SimulateEndpointTest(unittest.TestCase):
     def test_get_player_treats_regex_characters_as_plain_text(self):
         client = TestClient(api.app)
 
-        response = client.get("/player/[")
+        response = client.get("/api/player/[")
 
         self.assertEqual(response.status_code, 404)
 
@@ -317,7 +317,7 @@ class SimulateEndpointTest(unittest.TestCase):
         with patch("backend.app.api._fetch_common_player_info") as common_info:
             common_info.side_effect = TimeoutError("stats.nba.com timed out")
 
-            response = client.get("/player/Michael%20Jordan")
+            response = client.get("/api/player/Michael%20Jordan")
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -332,7 +332,7 @@ class SimulateEndpointTest(unittest.TestCase):
         with patch("backend.app.api._fetch_common_player_info") as common_info:
             common_info.side_effect = TimeoutError("stats.nba.com timed out")
 
-            response = client.get("/player/Kyrie%20Irving")
+            response = client.get("/api/player/Kyrie%20Irving")
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -349,7 +349,7 @@ class SimulateEndpointTest(unittest.TestCase):
         client = TestClient(api.app)
 
         response = client.post(
-            "/simulate",
+            "/api/simulate",
             json=self._payload(player_b_id=1),
         )
 
@@ -359,7 +359,7 @@ class SimulateEndpointTest(unittest.TestCase):
         client = TestClient(api.app)
 
         response = client.post(
-            "/simulate",
+            "/api/simulate",
             json={"player_a_id": 1, "player_b_id": 2, "seed": 1},
         )
 
@@ -380,7 +380,7 @@ class SimulateEndpointTest(unittest.TestCase):
         with patch("backend.app.api.SimulationEngine") as engine_class:
             engine_class.return_value.simulate.return_value = expected
 
-            response = client.post("/simulate", json=self._payload())
+            response = client.post("/api/simulate", json=self._payload())
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), expected)
@@ -397,7 +397,7 @@ class SimulateEndpointTest(unittest.TestCase):
         client = TestClient(api.app)
 
         response = client.post(
-            "/simulate/bulk",
+            "/api/simulate/bulk",
             json={
                 "player_a_id": 1,
                 "player_b_id": 1,
@@ -424,7 +424,7 @@ class SimulateEndpointTest(unittest.TestCase):
             engine_class.return_value.simulate_bulk.return_value = expected
 
             response = client.post(
-                "/simulate/bulk",
+                "/api/simulate/bulk",
                 json={
                     "player_a_id": 1,
                     "player_b_id": 2,

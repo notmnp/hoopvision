@@ -36,7 +36,7 @@ class BracketEndpointTest(unittest.TestCase):
         api.bracket_orchestrator._simulate_game = self._original
 
     def test_create_returns_bracket_id_and_state(self):
-        response = self.client.post("/bracket", json=make_payload(4))
+        response = self.client.post("/api/bracket", json=make_payload(4))
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertIn("bracket_id", body)
@@ -45,32 +45,32 @@ class BracketEndpointTest(unittest.TestCase):
     def test_create_rejects_mismatched_participant_count(self):
         payload = make_payload(8)
         payload["participants"] = payload["participants"][:5]
-        response = self.client.post("/bracket", json=payload)
+        response = self.client.post("/api/bracket", json=payload)
         self.assertEqual(response.status_code, 400)
 
     def test_create_rejects_unsupported_size(self):
         payload = make_payload(4)
         payload["bracket_size"] = 6
-        response = self.client.post("/bracket", json=payload)
+        response = self.client.post("/api/bracket", json=payload)
         self.assertEqual(response.status_code, 422)
 
     def test_get_unknown_bracket_returns_404(self):
-        self.assertEqual(self.client.get("/bracket/nope").status_code, 404)
+        self.assertEqual(self.client.get("/api/bracket/nope").status_code, 404)
 
     def test_run_round_then_run_all_completes(self):
-        bracket_id = self.client.post("/bracket", json=make_payload(8)).json()[
+        bracket_id = self.client.post("/api/bracket", json=make_payload(8)).json()[
             "bracket_id"
         ]
 
-        after_round = self.client.post(f"/bracket/{bracket_id}/run-round").json()
+        after_round = self.client.post(f"/api/bracket/{bracket_id}/run-round").json()
         self.assertEqual(after_round["status"], "IN_PROGRESS")
         self.assertTrue(all(m["winner"] for m in after_round["rounds"][0]["matchups"]))
 
-        final = self.client.post(f"/bracket/{bracket_id}/run-all").json()
+        final = self.client.post(f"/api/bracket/{bracket_id}/run-all").json()
         self.assertEqual(final["status"], "COMPLETE")
         self.assertIsNotNone(final["champion"])
 
-        fetched = self.client.get(f"/bracket/{bracket_id}").json()
+        fetched = self.client.get(f"/api/bracket/{bracket_id}").json()
         self.assertEqual(fetched["status"], "COMPLETE")
 
 
@@ -80,7 +80,7 @@ class DefaultBracketEndpointTest(unittest.TestCase):
 
     def test_default_returns_config_with_correct_count_and_seeds(self):
         for size in (4, 8, 16):
-            response = self.client.get(f"/bracket/default/{size}")
+            response = self.client.get(f"/api/bracket/default/{size}")
             self.assertEqual(response.status_code, 200, size)
             body = response.json()
             self.assertEqual(body["bracket_size"], size)
@@ -90,19 +90,19 @@ class DefaultBracketEndpointTest(unittest.TestCase):
             self.assertTrue(all(p["player_id"] > 0 for p in body["participants"]))
 
     def test_default_seed_order_is_stable_prefix(self):
-        four = self.client.get("/bracket/default/4").json()["participants"]
-        sixteen = self.client.get("/bracket/default/16").json()["participants"]
+        four = self.client.get("/api/bracket/default/4").json()["participants"]
+        sixteen = self.client.get("/api/bracket/default/16").json()["participants"]
         self.assertEqual(
             [p["player_id"] for p in four],
             [p["player_id"] for p in sixteen[:4]],
         )
 
     def test_default_rejects_unsupported_size(self):
-        self.assertEqual(self.client.get("/bracket/default/6").status_code, 400)
+        self.assertEqual(self.client.get("/api/bracket/default/6").status_code, 400)
 
     def test_default_config_is_usable_to_create_a_bracket(self):
-        config = self.client.get("/bracket/default/8").json()
-        response = self.client.post("/bracket", json=config)
+        config = self.client.get("/api/bracket/default/8").json()
+        response = self.client.post("/api/bracket", json=config)
         self.assertEqual(response.status_code, 200)
 
 

@@ -35,14 +35,14 @@ class PlayerSeasonEndpointsTest(unittest.TestCase):
 
     def test_get_player_seasons_returns_options(self):
         with patch.object(api, "list_player_seasons", return_value=SEASONS):
-            response = self.client.get("/player/2544/seasons")
+            response = self.client.get("/api/player/2544/seasons")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), SEASONS)
 
     def test_get_player_season_returns_stats(self):
         with patch.object(api, "get_player_season_stats", return_value=SEASON_STATS):
-            response = self.client.get("/player/2544/season/2023-24")
+            response = self.client.get("/api/player/2544/season/2023-24")
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
@@ -51,7 +51,7 @@ class PlayerSeasonEndpointsTest(unittest.TestCase):
 
     def test_get_player_season_missing_returns_404(self):
         with patch.object(api, "get_player_season_stats", return_value=None):
-            response = self.client.get("/player/2544/season/1999-00")
+            response = self.client.get("/api/player/2544/season/1999-00")
 
         self.assertEqual(response.status_code, 404)
 
@@ -59,7 +59,7 @@ class PlayerSeasonEndpointsTest(unittest.TestCase):
         with patch.object(
             api, "list_player_seasons", side_effect=RuntimeError("nba down")
         ):
-            response = self.client.get("/player/2544/seasons")
+            response = self.client.get("/api/player/2544/seasons")
 
         self.assertEqual(response.status_code, 502)
 
