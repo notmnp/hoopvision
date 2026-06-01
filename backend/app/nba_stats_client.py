@@ -26,7 +26,10 @@ NBA_STATS_RETRY_BACKOFF_SECONDS = float(
 NBA_STATS_MIN_REQUEST_INTERVAL_SECONDS = float(
     os.getenv("NBA_STATS_MIN_REQUEST_INTERVAL_SECONDS", "1.0")
 )
-NBA_STATS_CACHE_TTL_SECONDS = float(os.getenv("NBA_STATS_CACHE_TTL_SECONDS", "86400"))
+# 7 days: NBA Stats data is effectively immutable for past seasons (career
+# totals, shot charts), so a long TTL maximizes cache hits and minimizes proxy
+# bandwidth. Only the in-progress season/live data goes stale within a week.
+NBA_STATS_CACHE_TTL_SECONDS = float(os.getenv("NBA_STATS_CACHE_TTL_SECONDS", "604800"))
 
 # stats.nba.com blackholes requests from cloud/datacenter IPs (e.g. Vercel's AWS
 # ranges), so on a deployed host every nba_api call times out. Routing those
