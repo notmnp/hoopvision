@@ -20,6 +20,7 @@ from .nba_stats_client import (
     NBA_STATS_HEADERS,
     NBA_STATS_TIMEOUT_SECONDS,
     fetch_stats_data,
+    nba_stats_proxy,
 )
 
 
@@ -96,6 +97,7 @@ class ShotChartService:
                 context_measure_simple="FGA",
                 headers=NBA_STATS_HEADERS.copy(),
                 timeout=NBA_STATS_TIMEOUT_SECONDS,
+                proxy=nba_stats_proxy(),
             ),
         )
         return data.get("Shot_Chart_Detail", [])

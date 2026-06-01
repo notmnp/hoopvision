@@ -18,6 +18,7 @@ from .nba_stats_client import (
     NBA_STATS_HEADERS,
     NBA_STATS_TIMEOUT_SECONDS,
     fetch_stats_data,
+    nba_stats_proxy,
 )
 from .player_data import get_player_season_stats, list_player_seasons
 from .simulation import SimulationEngine
@@ -252,6 +253,7 @@ def _resolve_combine_wingspan(
             season_all_time="All Time",
             headers=NBA_STATS_HEADERS.copy(),
             timeout=NBA_STATS_TIMEOUT_SECONDS,
+            proxy=nba_stats_proxy(),
         ),
     )
     target_name = _normalize_name(player_name)
@@ -379,6 +381,7 @@ def _fetch_common_player_info(player_id: int) -> dict[str, Any]:
             player_id=player_id,
             headers=NBA_STATS_HEADERS.copy(),
             timeout=NBA_STATS_TIMEOUT_SECONDS,
+            proxy=nba_stats_proxy(),
         ),
     )
 

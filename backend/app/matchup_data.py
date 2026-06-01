@@ -12,6 +12,7 @@ from .nba_stats_client import (
     NBA_STATS_HEADERS,
     NBA_STATS_TIMEOUT_SECONDS,
     fetch_stats_data,
+    nba_stats_proxy,
 )
 
 
@@ -144,6 +145,7 @@ class MatchupDataService:
                     season_type_playoffs="Regular Season",
                     headers=NBA_STATS_HEADERS.copy(),
                     timeout=NBA_STATS_TIMEOUT_SECONDS,
+                    proxy=nba_stats_proxy(),
                 ),
             )
             season_rows = data.get("SeasonMatchups", [])
@@ -175,6 +177,7 @@ class MatchupDataService:
                     context_measure_simple="FGA",
                     headers=NBA_STATS_HEADERS.copy(),
                     timeout=NBA_STATS_TIMEOUT_SECONDS,
+                    proxy=nba_stats_proxy(),
                 ),
             )
             rows.extend(data.get("Shot_Chart_Detail", []))
@@ -199,6 +202,7 @@ class MatchupDataService:
                     season=self._season_label(season),
                     headers=NBA_STATS_HEADERS.copy(),
                     timeout=NBA_STATS_TIMEOUT_SECONDS,
+                    proxy=nba_stats_proxy(),
                 ),
             )
             for row in data.get("LeagueDashPlayerBioStats", []):

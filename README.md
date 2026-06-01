@@ -177,8 +177,9 @@ required production variables are the Vercel KV credentials.
 
 | Variable | Required | Default | Notes |
 |---|---|---|---|
-| `KV_REST_API_URL` | Yes (production) | — | Upstash Redis REST URL for bracket session persistence. Auto-injected by Vercel when a KV store is connected. |
+| `KV_REST_API_URL` | Yes (production) | — | Upstash Redis REST URL. Powers bracket session persistence AND the NBA Stats response cache (survives cold starts). Auto-injected by Vercel when a KV store is connected. |
 | `KV_REST_API_TOKEN` | Yes (production) | — | Upstash Redis REST token. Auto-injected by Vercel when a KV store is connected. |
+| `NBA_STATS_PROXY` | Yes (production) | — | Proxy URL(s) for `stats.nba.com` calls, e.g. `http://user:pass@p.webshare.io:80` (comma-separated to rotate). Required on cloud hosts because `stats.nba.com` blocks datacenter IPs; without it player/season/shot-chart/simulation endpoints time out. Not needed locally (a residential IP isn't blocked). `cdn.nba.com` calls — headshots, scoreboard — are never proxied. |
 | `BULK_SIM_MAX_N` | No | `1000` | Upper bound on `POST /api/simulate/bulk` count. Lower to `200` if bulk simulations time out on the Hobby plan. |
 | `CORS_ORIGINS` | No | `http://localhost:5173` | Comma-separated allowed origins. The default covers local development; not needed in production since requests are same-origin. |
 

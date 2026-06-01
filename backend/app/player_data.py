@@ -18,6 +18,7 @@ from .nba_stats_client import (
     NBA_STATS_HEADERS,
     NBA_STATS_TIMEOUT_SECONDS,
     fetch_stats_data,
+    nba_stats_proxy,
 )
 
 
@@ -64,6 +65,7 @@ def fetch_career_season_rows(player_id: int) -> list[dict[str, Any]]:
             player_id=player_id,
             headers=NBA_STATS_HEADERS.copy(),
             timeout=NBA_STATS_TIMEOUT_SECONDS,
+            proxy=nba_stats_proxy(),
         ),
     )
     return data.get("SeasonTotalsRegularSeason", [])
