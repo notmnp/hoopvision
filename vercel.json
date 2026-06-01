@@ -1,14 +1,18 @@
 {
-  "buildCommand": "cd frontend && npm install && npm run build",
-  "outputDirectory": "frontend/dist",
-  "functions": {
-    "backend/app/api.py": {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "experimentalServices": {
+    "web": {
+      "entrypoint": "frontend",
+      "routePrefix": "/",
+      "framework": "vite"
+    },
+    "api": {
+      "entrypoint": "backend/app/api.py",
+      "routePrefix": "/api",
+      "framework": "fastapi",
+      "memory": 1024,
       "maxDuration": 300,
-      "memory": 1024
+      "excludeFiles": "frontend/**"
     }
-  },
-  "rewrites": [
-    { "source": "/api/:path*", "destination": "/backend/app/api.py" },
-    { "source": "/(.*)", "destination": "/index.html" }
-  ]
+  }
 }

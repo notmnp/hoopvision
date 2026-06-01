@@ -1,6 +1,5 @@
 backend/tests/
 backend/scripts/
-frontend/
 docs/
 **/__pycache__/
 **/*.pyc
