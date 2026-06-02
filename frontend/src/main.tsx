@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom"
 import { ThemeProvider } from "./components/ui/theme-provider.tsx"
 import { TooltipProvider } from "./components/ui/tooltip.tsx"
 import { Analytics } from "@vercel/analytics/react"
+import 'katex/dist/katex.min.css'
 import './index.css'
 import Navbar from './pages/Navbar.tsx'
 import AppFooter from './components/AppFooter.tsx'
