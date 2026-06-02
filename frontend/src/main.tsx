@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Routes, Route } from "react-router-dom"
 import { ThemeProvider } from "./components/ui/theme-provider.tsx"
 import { TooltipProvider } from "./components/ui/tooltip.tsx"
+import { Analytics } from "@vercel/analytics/react"
 import './index.css'
 import Navbar from './pages/Navbar.tsx'
 import Home from './pages/Home.tsx'
@@ -23,6 +24,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/simulate" element={<Simulator />} />
             <Route path="/bracket/:bracketId?" element={<BracketSetup />} />
           </Routes>
+          <Analytics />
         </TooltipProvider>
       </ThemeProvider>
     </BrowserRouter>
