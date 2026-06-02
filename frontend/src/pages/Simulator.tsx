@@ -16,7 +16,6 @@ import {
   AlertTriangle,
   CalendarDays,
   ChevronDown,
-  CornerDownLeft,
   Dices,
   Info,
   ListOrdered,
@@ -35,6 +34,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { getTeamColor, getTeamLogoUrl, withAlpha } from "@/lib/teamColors"
+import { peakSeason } from "@/lib/peakSeasons"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -145,8 +145,16 @@ const QUICK_PICKS_B: QuickPick[] = [
 // Curated classic rivalries for the "Surprise me" shuffle and the sample bout
 // shown on a cold (no-params) arrival. Names resolve through the same /player
 // search as a typed pick; `tag` is the editorial billing for the verdict-style
-// header. The first entry doubles as the default featured matchup.
-type Rivalry = { tag: string; a: string; b: string }
+// header. The first entry doubles as the default featured matchup. Seasons are
+// optional — when omitted each corner defaults to the player's peak season (see
+// peakSeasons), which is the case for every curated rivalry below.
+type Rivalry = {
+  tag: string
+  a: string
+  b: string
+  seasonA?: string
+  seasonB?: string
+}
 
 const RIVALRIES: Rivalry[] = [
   { tag: "The Main Event", a: "Michael Jordan", b: "LeBron James" },
@@ -160,9 +168,12 @@ const RIVALRIES: Rivalry[] = [
 
 // A request from the controller to load a named player into the slot (used by
 // deep-link preload and the "Surprise me" shuffle). The `token` makes each
-// request unique so repeating the same name still re-fires the effect.
+// request unique so repeating the same name still re-fires the effect. An
+// optional `season` pins the corner to a specific season_id (e.g. a peak
+// season); when absent or unavailable the slot falls back to the most recent.
 interface PreloadRequest {
   name: string
+  season?: string
   token: number
 }
 
@@ -247,8 +258,18 @@ function PlayerSelectionController() {
   // a preload request into each slot — they resolve names via the same search
   // path as the quick-pick tiles, which auto-selects each default season.
   const loadBout = useCallback((rivalry: Rivalry) => {
-    setPreloadA({ name: rivalry.a, token: nextToken() })
-    setPreloadB({ name: rivalry.b, token: nextToken() })
+    // Each corner loads at its explicit season when given, otherwise the
+    // player's peak season — never just "most recent".
+    setPreloadA({
+      name: rivalry.a,
+      season: rivalry.seasonA ?? peakSeason(rivalry.a),
+      token: nextToken(),
+    })
+    setPreloadB({
+      name: rivalry.b,
+      season: rivalry.seasonB ?? peakSeason(rivalry.b),
+      token: nextToken(),
+    })
     setBilling(rivalry.tag)
     // Fresh bout (deep-link / Surprise me / sample) is a new matchup — re-arm
     // the dramatic tip-off intro.
@@ -268,7 +289,7 @@ function PlayerSelectionController() {
     tipOffTimer.current = window.setTimeout(() => {
       setTipOffShow(false)
       tipOffTimer.current = null
-    }, 1600)
+    }, 2000)
   }, [])
 
   function surpriseMe() {
@@ -279,20 +300,24 @@ function PlayerSelectionController() {
   }
 
   // Deep-link / cold-start preload, run exactly once on mount. With ?a=&b= we
-  // honor the requested matchup; with neither we drop in a featured sample bout
-  // so the page is never empty (clearly labeled and fully swappable).
+  // honor the requested matchup (?sa=&sb= pin each corner's season, e.g. the
+  // peak seasons the homepage debates pass); with neither we drop in a featured
+  // sample bout so the page is never empty (clearly labeled and fully swappable).
   const didPreload = useRef(false)
   useEffect(() => {
     if (didPreload.current) return
     didPreload.current = true
     const a = searchParams.get("a")?.trim()
     const b = searchParams.get("b")?.trim()
+    const sa = searchParams.get("sa")?.trim() || undefined
+    const sb = searchParams.get("sb")?.trim() || undefined
     if (a && b) {
-      loadBout({ tag: "Your Matchup", a, b })
+      loadBout({ tag: "Your Matchup", a, b, seasonA: sa, seasonB: sb })
     } else if (a || b) {
-      // Only one corner specified — fill it and leave the other for the user.
-      if (a) setPreloadA({ name: a, token: nextToken() })
-      if (b) setPreloadB({ name: b, token: nextToken() })
+      // Only one corner specified — fill it (at its requested or peak season)
+      // and leave the other for the user.
+      if (a) setPreloadA({ name: a, season: sa ?? peakSeason(a), token: nextToken() })
+      if (b) setPreloadB({ name: b, season: sb ?? peakSeason(b), token: nextToken() })
       setBilling("Pick a challenger")
     } else {
       loadBout({ ...RIVALRIES[0], tag: "Sample bout — swap in anyone" })
@@ -416,33 +441,6 @@ function PlayerSelectionController() {
     }
   }
 
-  // Press Enter to run when the matchup is ready (ignored while typing in an
-  // input / when a popover or select is capturing keys).
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Enter" || event.metaKey || event.ctrlKey) return
-      const el = event.target as HTMLElement | null
-      const tag = el?.tagName
-      if (
-        tag === "INPUT" ||
-        tag === "TEXTAREA" ||
-        el?.isContentEditable ||
-        el?.closest("[role='dialog'],[role='listbox'],[role='combobox']")
-      ) {
-        return
-      }
-      if (canRunSimulation && !busy) {
-        event.preventDefault()
-        runSimulation()
-      }
-    }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
-    // runSimulation closes over the current selection; re-bind when readiness
-    // or busy state changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canRunSimulation, busy])
-
   // Clear any pending tip-off fade-out timer on unmount.
   useEffect(() => {
     return () => {
@@ -457,7 +455,7 @@ function PlayerSelectionController() {
       <div className="mb-6 flex flex-col gap-4 pb-6 duration-700 animate-in fade-in slide-in-from-bottom-4 [animation-fill-mode:both] md:flex-row md:items-end md:justify-between">
         <div>
           <Kicker ruled>The ISO Lab</Kicker>
-          <h1 className="mt-2 display text-5xl sm:text-6xl">Tale of the Tape</h1>
+          <h1 className="mt-2 display text-5xl sm:text-6xl">Stage a Matchup</h1>
           <p className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 font-condensed text-[0.78rem] font-bold uppercase tracking-[0.14em] text-muted-foreground">
             <span>Two players</span>
             <span aria-hidden>·</span>
@@ -481,7 +479,7 @@ function PlayerSelectionController() {
             className="font-condensed font-bold uppercase tracking-[0.14em] sm:w-auto"
           >
             <Dices className="h-4 w-4" />
-            Surprise me
+            Random matchup
           </Button>
         </div>
       </div>
@@ -718,7 +716,6 @@ function RunActionBar({
         <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
           <Button
             variant="secondary"
-            size="lg"
             disabled={!canRun || busy}
             className="w-full font-condensed font-bold uppercase tracking-[0.14em] tabular-nums sm:w-auto"
             onClick={onRunBulk}
@@ -737,7 +734,6 @@ function RunActionBar({
               <span className="flex w-full sm:w-auto">
                 <Button
                   disabled={!canRun || busy}
-                  size="lg"
                   className="w-full font-condensed font-bold uppercase tracking-[0.14em] sm:w-auto"
                   onClick={onRun}
                 >
@@ -747,11 +743,6 @@ function RunActionBar({
                     <Swords className="h-4 w-4" />
                   )}
                   {hasResult ? "Run it back" : "Run game"}
-                  {canRun && !busy && (
-                    <kbd className="ml-1 hidden items-center gap-0.5 rounded-sm bg-primary-foreground/20 px-1.5 py-0.5 font-condensed text-[0.7rem] sm:inline-flex">
-                      <CornerDownLeft className="h-3 w-3" />
-                    </kbd>
-                  )}
                 </Button>
               </span>
             </TooltipTrigger>
@@ -878,17 +869,23 @@ function PlayerSlot({
   }, [seasonStats, onSeasonStatsChange])
 
   // Confirm a player picked from the combobox: load the player's seasons, then
-  // default the selection to the most recent one (the list is returned
-  // newest-first) so the matchup is runnable immediately. The user can still
-  // pick a different season from the dropdown.
-  async function confirmPlayer(result: PlayerProfile) {
+  // default the selection. A `seasonOverride` (e.g. a peak season from a deep-
+  // link / sample bout) wins when that season exists for the player; otherwise
+  // we fall back to the most recent one (the list is newest-first) so the
+  // matchup is always runnable. The user can still change it from the dropdown.
+  async function confirmPlayer(result: PlayerProfile, seasonOverride?: string) {
     onSelect(result)
     clearSeasonStats()
     const loadedSeasons = await loadSeasons(result.player_id)
-    const mostRecentSeason = loadedSeasons?.[0]?.season_id ?? null
-    onSeasonSelect(mostRecentSeason)
-    if (mostRecentSeason) {
-      loadSeasonStats(result.player_id, mostRecentSeason)
+    const hasOverride =
+      !!seasonOverride &&
+      !!loadedSeasons?.some((s) => s.season_id === seasonOverride)
+    const season = hasOverride
+      ? seasonOverride!
+      : loadedSeasons?.[0]?.season_id ?? null
+    onSeasonSelect(season)
+    if (season) {
+      loadSeasonStats(result.player_id, season)
     }
   }
 
@@ -918,7 +915,7 @@ function PlayerSlot({
       try {
         const result = await searchPlayer(preload.name)
         if (!cancelled && result) {
-          await confirmPlayer(result)
+          await confirmPlayer(result, preload.season)
         }
       } finally {
         if (!cancelled) {
@@ -958,7 +955,9 @@ function PlayerSlot({
     <div
       className={cn(
         "relative isolate flex flex-col overflow-hidden rounded-sm border bg-card",
-        compact ? "min-h-0" : "min-h-[32rem]"
+        // Empty drop-zone gets a floor so it has presence; a filled card sizes
+        // to its content (no dead space below the stat bars).
+        !profile && !preloadingName && "min-h-[29rem]"
       )}
     >
       {/* A fine printed halftone tone in the player's team color, bleeding from
@@ -1489,23 +1488,7 @@ function PossessionModeToggle({
 }) {
   return (
     <div className="flex flex-col gap-1.5 sm:items-end">
-      <div className="flex items-center gap-1.5">
-        <Kicker tone="muted">Possession</Kicker>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span
-              tabIndex={0}
-              aria-label="What do Winners and Losers mean?"
-              className="inline-flex cursor-default rounded-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-            >
-              <Info className="h-3.5 w-3.5" />
-            </span>
-          </TooltipTrigger>
-          <TooltipContent className="max-w-xs">
-            Who gets the ball after a bucket — hover a mode for details.
-          </TooltipContent>
-        </Tooltip>
-      </div>
+      <Kicker tone="muted">Possession</Kicker>
       <div
         role="radiogroup"
         aria-label="Possession mode"
@@ -1700,30 +1683,28 @@ export function MatchSummaryView({
   return (
     <Card className="rounded-sm">
       <CardHeader>
-        <div className="flex items-center gap-2">
-          <Kicker ruled>The Game Story</Kicker>
-          {summary.data_warnings.length > 0 && (
-            <DataWarningInfo warnings={summary.data_warnings} />
-          )}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Kicker ruled>The Game Story</Kicker>
+            {summary.data_warnings.length > 0 && (
+              <DataWarningInfo warnings={summary.data_warnings} />
+            )}
+          </div>
+          <Kicker tone="muted">Final</Kicker>
         </div>
       </CardHeader>
       <CardContent className="space-y-5">
-        <div className="space-y-2">
-          <div className="text-center">
-            <Kicker tone="muted">Final</Kicker>
-          </div>
-          <div className="divide-y overflow-hidden rounded-sm border">
-            <ScoreRow
-              name={playerAName}
-              score={summary.final_score.a}
-              winner={aWon}
-            />
-            <ScoreRow
-              name={playerBName}
-              score={summary.final_score.b}
-              winner={!aWon}
-            />
-          </div>
+        <div className="divide-y overflow-hidden rounded-sm border">
+          <ScoreRow
+            name={playerAName}
+            score={summary.final_score.a}
+            winner={aWon}
+          />
+          <ScoreRow
+            name={playerBName}
+            score={summary.final_score.b}
+            winner={!aWon}
+          />
         </div>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

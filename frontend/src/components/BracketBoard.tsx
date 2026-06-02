@@ -1,6 +1,6 @@
 import * as React from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Check, Crown, Lock, ListOrdered, Network, Rows3, Trophy } from "lucide-react"
+import { Check, Lock, Network, Rows3, Trophy } from "lucide-react"
 
 import {
   BracketMatchup,
@@ -136,12 +136,6 @@ export function BracketBoard({
           ? { style: { left: "-200vw", top: 0 } as React.CSSProperties }
           : {})}
       >
-        {view === "overview" && (
-          <p className="mb-4 max-w-prose font-sans text-sm leading-relaxed text-muted-foreground">
-            The full tournament tree — pan across to trace every path to the
-            crown. The round reader above keeps the action scroll-free.
-          </p>
-        )}
         <div ref={treeRef as React.RefObject<HTMLDivElement>} className="overflow-x-auto pb-4">
           <BracketTree
             rounds={state.rounds}
@@ -243,16 +237,36 @@ function RoundNavigator({
             disabled={!reached}
             onClick={() => reached && onSelect(index)}
             className={cn(
-              "group flex min-w-[7.5rem] flex-1 flex-col gap-1.5 rounded-sm border px-3 py-2 text-left transition-colors",
+              "group relative flex min-w-[7.5rem] flex-1 flex-col gap-1.5 overflow-hidden rounded-sm border px-3 py-2 text-left transition-colors",
               "disabled:cursor-not-allowed",
               isActive
-                ? "border-primary bg-primary/10"
+                ? "border-primary bg-card"
                 : reached
                   ? "border-border bg-card hover:border-primary/60"
                   : "border-dashed border-border bg-muted/20"
             )}
           >
-            <div className="flex items-center justify-between gap-2">
+            {/* Active round wears the same printed halftone "ink splash" as the
+                homepage cover / ISO Lab cards: vermillion dots bleeding from the
+                top-right and dissolving down. Painted as an overlay OVER the card
+                fill (the .halftone-splash mask would otherwise fade the whole
+                box, border and text included). */}
+            {isActive && (
+              <span
+                aria-hidden
+                className="halftone-splash pointer-events-none absolute inset-0"
+                style={
+                  {
+                    "--splash-dot":
+                      "color-mix(in oklch, var(--primary) 26%, transparent)",
+                    backgroundImage:
+                      "radial-gradient(var(--splash-dot) 1.2px, transparent 1.7px)",
+                    backgroundSize: "8px 8px",
+                  } as React.CSSProperties
+                }
+              />
+            )}
+            <div className="relative flex items-center justify-between gap-2">
               <span
                 className={cn(
                   "kicker",
@@ -269,7 +283,7 @@ function RoundNavigator({
             </div>
             <span
               className={cn(
-                "font-display text-base font-black uppercase leading-none tracking-tight",
+                "relative font-display text-base font-black uppercase leading-none tracking-tight",
                 isActive
                   ? "text-primary"
                   : reached
@@ -304,10 +318,10 @@ function RoundStatusDot({
   }
   if (isLive) {
     return (
-      <span aria-label="Now playing" className="relative inline-flex h-2.5 w-2.5">
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/60 motion-reduce:animate-none" />
-        <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-primary" />
-      </span>
+      <span
+        aria-label="Now playing"
+        className="inline-flex h-2.5 w-2.5 rounded-full bg-primary"
+      />
     )
   }
   if (!reached) {
@@ -352,40 +366,41 @@ function RoundGrid({
 
 function ChampionBanner({ champion }: { champion: BracketParticipant }) {
   return (
-    <div className="relative mb-8 overflow-hidden rounded-sm border-2 border-gold/60 bg-gradient-to-b from-gold/20 via-gold/5 to-transparent p-7 text-center animate-in fade-in zoom-in-95 duration-700 [animation-fill-mode:both] motion-reduce:animate-none sm:p-10">
-      {/* Soft glows behind the champion for a celebratory cover feel. */}
-      <div className="pointer-events-none absolute left-1/2 top-0 h-72 w-72 -translate-x-1/2 -translate-y-1/3 rounded-full bg-gold/25 blur-3xl" />
-      {/* Masthead band — sells the "cover" framing. */}
-      <div className="relative mb-5 flex items-center justify-center gap-3 font-condensed text-xs font-bold uppercase tracking-[0.2em] text-foreground">
-        <span aria-hidden className="h-px w-8 bg-gold/50 sm:w-16" />
-        <Trophy className="h-4 w-4" />
-        <span>The GOAT — Crowned</span>
-        <Trophy className="h-4 w-4" />
-        <span aria-hidden className="h-px w-8 bg-gold/50 sm:w-16" />
-      </div>
+    <div className="relative mb-6 overflow-hidden rounded-sm border border-gold/60 bg-card p-6 text-center animate-in fade-in zoom-in-95 duration-700 [animation-fill-mode:both] motion-reduce:animate-none sm:p-8">
+      {/* Printed gold halftone "ink tone" bleeding from the top-right and
+          dissolving down — the same newspaper splash as the homepage cover.
+          Gold is reserved for this champion moment. */}
+      <span
+        aria-hidden
+        className="halftone-splash pointer-events-none absolute inset-0"
+        style={
+          {
+            "--splash-dot": "color-mix(in oklch, var(--gold) 32%, transparent)",
+            backgroundImage:
+              "radial-gradient(var(--splash-dot) 1.6px, transparent 2.2px)",
+            backgroundSize: "11px 11px",
+          } as React.CSSProperties
+        }
+      />
 
-      <div className="relative flex flex-col items-center gap-4">
-        <div className="relative">
-          <HalftoneAvatar
-            src={headshotUrl(champion.player_id)}
-            alt={participantLabel(champion)}
-            fallback={initials(participantLabel(champion))}
-            size={132}
-            active
-            accent="var(--gold)"
-          />
-          <Crown className="absolute -top-7 left-1/2 h-11 w-11 -translate-x-1/2 fill-gold text-gold drop-shadow" />
-        </div>
-
-        <h2 className="font-display text-5xl font-black uppercase leading-[0.92] tracking-tight text-balance sm:text-7xl">
+      {/* Editorial verdict block: eyebrow kicker → printed headshot → name →
+          season caption, matching the rest of the site's section voice. */}
+      <div className="relative flex flex-col items-center gap-3">
+        <Kicker tone="muted">The Verdict</Kicker>
+        <HalftoneAvatar
+          src={headshotUrl(champion.player_id)}
+          alt={participantLabel(champion)}
+          fallback={initials(participantLabel(champion))}
+          size={92}
+          active
+          accent="var(--gold)"
+        />
+        <h2 className="display text-4xl leading-[0.95] text-balance sm:text-5xl">
           {participantLabel(champion)}
         </h2>
-
-        <div className="flex items-center gap-3 font-condensed text-sm font-bold uppercase tracking-[0.18em] tabular-nums text-foreground">
-          <span className="tabular-nums text-foreground">{champion.season_id}</span>
-          <span aria-hidden className="text-muted-foreground">◆</span>
-          <span className="text-muted-foreground">Tournament champion</span>
-        </div>
+        <p className="font-condensed text-xs font-bold uppercase tracking-[0.14em] tabular-nums text-muted-foreground">
+          {champion.season_id} · GOAT Bracket Champion
+        </p>
       </div>
     </div>
   )
@@ -423,7 +438,6 @@ function MatchupCard({
     >
       <ParticipantRow
         participant={matchup.player_a}
-        seed={matchup.seed_a}
         wins={matchup.series_wins.a}
         isWinner={aWon}
         isEliminated={bWon}
@@ -431,7 +445,6 @@ function MatchupCard({
       <div className="border-t" />
       <ParticipantRow
         participant={matchup.player_b}
-        seed={matchup.seed_b}
         wins={matchup.series_wins.b}
         isWinner={bWon}
         isEliminated={aWon}
@@ -441,12 +454,11 @@ function MatchupCard({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 w-full font-condensed text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground"
+            className="h-7 w-full font-condensed text-[0.7rem] font-bold uppercase tracking-[0.12em] text-muted-foreground hover:text-foreground"
             onClick={onViewSeries}
           >
-            <ListOrdered className="h-3.5 w-3.5" />
-            View Series ({matchup.games.length}{" "}
-            {matchup.games.length === 1 ? "game" : "games"}) →
+            View Series · {matchup.games.length}{" "}
+            {matchup.games.length === 1 ? "Game" : "Games"}
           </Button>
         </div>
       )}
@@ -456,13 +468,11 @@ function MatchupCard({
 
 function ParticipantRow({
   participant,
-  seed,
   wins,
   isWinner,
   isEliminated,
 }: {
   participant: BracketParticipant | null
-  seed: number | null
   wins: number
   isWinner: boolean
   isEliminated: boolean
@@ -479,20 +489,12 @@ function ParticipantRow({
   return (
     <div
       className={cn(
-        "relative flex items-center gap-3 p-3 transition-all",
-        // A left vermillion bar plus a tinted background marks the series winner.
-        isWinner && "border-l-2 border-primary bg-primary/10",
+        "flex items-center gap-3 p-3 transition-all",
+        // A tinted background (no rule) marks the series winner.
+        isWinner && "bg-primary/10",
         isEliminated && "opacity-40"
       )}
     >
-      <span
-        className={cn(
-          "w-4 shrink-0 text-center font-display text-sm font-black uppercase tabular-nums",
-          isWinner ? "text-primary" : "text-muted-foreground"
-        )}
-      >
-        {seed ?? ""}
-      </span>
       <Headshot
         playerId={participant.player_id}
         className={cn(

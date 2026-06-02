@@ -3,13 +3,20 @@ import { Activity, ArrowRight, ArrowUpRight, Swords, Trophy } from "lucide-react
 
 import { Button } from "@/components/ui/button"
 import { Kicker, Rule, StatFigure, HalftoneAvatar } from "@/components/editorial"
+import { peakSeason } from "@/lib/peakSeasons"
 
 const HEADSHOT = (id: number) =>
   `https://cdn.nba.com/headshots/nba/latest/260x190/${id}.png`
 
-/** Deep-link into ISO Lab with both fighters preloaded. */
-const bout = (a: string, b: string) =>
-  `/simulate?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`
+/** Deep-link into ISO Lab with both fighters preloaded at their peak seasons. */
+const bout = (a: string, b: string) => {
+  const params = new URLSearchParams({ a, b })
+  const sa = peakSeason(a)
+  const sb = peakSeason(b)
+  if (sa) params.set("sa", sa)
+  if (sb) params.set("sb", sb)
+  return `/simulate?${params.toString()}`
+}
 
 /**
  * The cover-lines: the great debates, each a one-tap ticket into a
@@ -19,17 +26,17 @@ const DEBATES = [
   {
     a: { name: "Michael Jordan", short: "Jordan", id: 893 },
     b: { name: "LeBron James", short: "LeBron", id: 2544 },
-    note: "GOAT debate",
+    note: "GOAT",
   },
   {
     a: { name: "Kobe Bryant", short: "Kobe", id: 977 },
     b: { name: "Kevin Durant", short: "Durant", id: 201142 },
-    note: "Pure buckets",
+    note: "Pure hoops",
   },
   {
     a: { name: "Stephen Curry", short: "Curry", id: 201939 },
     b: { name: "Magic Johnson", short: "Magic", id: 77142 },
-    note: "Era clash",
+    note: "Best PG?",
   },
   {
     a: { name: "Allen Iverson", short: "Iverson", id: 947 },
@@ -123,13 +130,13 @@ const Home = () => {
 
           <p
             {...reveal(200)}
-            className="mt-8 max-w-md text-pretty font-display text-xl italic leading-relaxed text-muted-foreground"
+            className="mt-10 max-w-md text-pretty font-display text-xl italic leading-relaxed text-muted-foreground"
           >
             Pick any two legends, any era. Hooper runs their one-on-one a
             thousand times on real NBA tendencies — then hands you the verdict.
           </p>
 
-          <div {...reveal(300)} className="mt-8 flex flex-wrap items-center gap-3">
+          <div {...reveal(300)} className="mt-6 flex flex-wrap items-center gap-3">
             <Button
               asChild
               size="lg"
@@ -265,7 +272,7 @@ const Home = () => {
               <div className="relative flex items-center gap-2.5">
                 <dept.icon className="size-5 text-primary" />
                 {dept.live ? (
-                  <span className="inline-flex items-center gap-1.5 bg-court px-2 py-0.5 text-[0.7rem] font-bold uppercase tracking-[0.08em] text-court-foreground">
+                  <span className="ml-auto inline-flex items-center gap-1.5 bg-primary px-2 py-0.5 text-[0.7rem] font-bold uppercase tracking-[0.08em] text-primary-foreground">
                     <span className="size-1.5 animate-pulse rounded-full bg-current" />
                     Live
                   </span>

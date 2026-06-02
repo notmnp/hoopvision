@@ -66,12 +66,9 @@ export function BracketBuilder({
             key={i}
             className="overflow-hidden rounded-sm border bg-card"
           >
-            <div className="flex items-center justify-between border-b bg-muted/30 px-2.5 py-1.5">
+            <div className="flex items-center border-b bg-muted/30 px-2.5 py-1.5">
               <span className="kicker text-muted-foreground">
                 Matchup {i + 1}
-              </span>
-              <span className="font-condensed text-xs font-bold uppercase tracking-[0.1em] tabular-nums text-muted-foreground/70">
-                {pair.seed_a} v {pair.seed_b}
               </span>
             </div>
             <SlotPicker
@@ -146,9 +143,6 @@ function SlotPicker({
   if (slot.player_id !== null) {
     return (
       <div className="flex items-center gap-2.5 p-2.5">
-        <span className="w-4 shrink-0 text-center font-display text-sm font-black uppercase tabular-nums text-primary">
-          {seed}
-        </span>
         {/* HalftoneAvatar renders the proxied headshot as a duotone print
             cutout; its initials fallback shows if the photo errors. The setup
             tree isn't part of the PNG export, so crossOrigin isn't required
@@ -163,7 +157,7 @@ function SlotPicker({
         <div className="min-w-0 flex-1">
           <div
             title={slot.name ?? `Player #${slot.player_id}`}
-            className="line-clamp-2 font-display text-sm font-bold uppercase leading-tight tracking-tight text-primary"
+            className="line-clamp-2 font-display text-sm font-bold uppercase leading-tight tracking-tight text-foreground"
           >
             {participantLastName({ name: slot.name, player_id: slot.player_id })}
           </div>
@@ -220,9 +214,6 @@ function SlotPicker({
             aria-hidden
             className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 font-display text-3xl font-black leading-none tabular-nums text-foreground/[0.06]"
           >
-            {seed}
-          </span>
-          <span className="w-4 shrink-0 text-center font-display text-sm font-black uppercase tabular-nums text-muted-foreground group-hover:text-primary">
             {seed}
           </span>
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-sm border border-dashed border-border bg-muted/40 text-muted-foreground group-hover:border-primary/60 group-hover:text-primary">

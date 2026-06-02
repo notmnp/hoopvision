@@ -1,53 +1,57 @@
 // One brand color per NBA franchise, keyed by the TEAM_ABBREVIATION the stats
-// API returns. Where the official primaries collide (the league has many reds
-// and navies), a recognizable secondary is used instead so that no two teams
-// share a value and the palette spreads across the hue wheel as much as the
-// real brands allow — e.g. Hornets teal, Nuggets gold, Knicks orange, Wizards
-// red, Spurs silver. Some same-family neighbors (multiple reds/blues) are
-// unavoidable; the team logo + abbreviation disambiguate those. Unmapped
-// abbreviations fall back to `null` (the card renders without a team accent).
+// API returns. These are *editorial* variants of the official brands, not the
+// raw digital hexes: each was converted to OKLCH, had its chroma capped well
+// below the vermillion star accent (~0.115 vs the accent's 0.2) and its
+// lightness pulled toward the accent's mid-tone, then converted back. Hue is
+// preserved exactly, so every team still reads as itself (Celtics green, Lakers
+// purple, Knicks orange) but as a muted printed ink that sits in the same
+// warm-paper world as the rest of the palette instead of clashing with it.
+// Same-family neighbors (the league's many reds/navies) are unavoidable; the
+// team logo + abbreviation disambiguate those. Unmapped abbreviations fall back
+// to `null` (the card renders without a team accent). To retune, edit the raw
+// brand hexes + muting constants in the generator and regenerate.
 const TEAM_PRIMARY_COLORS: Record<string, string> = {
   // Current franchises
-  ATL: "#E03A3E", // red
-  BOS: "#007A33", // green
-  BKN: "#000000", // black
-  CHA: "#00788C", // teal
-  CHI: "#CE1141", // red
-  CLE: "#860038", // wine
-  DAL: "#0053BC", // royal blue
-  DEN: "#FEC524", // gold
-  DET: "#C8102E", // red
-  GSW: "#1D428A", // navy blue
-  HOU: "#BA0C2F", // deep red
-  IND: "#002D62", // navy
-  LAC: "#ED174C", // red
-  LAL: "#552583", // purple
-  MEM: "#5D76A9", // steel blue
-  MIA: "#98002E", // maroon
-  MIL: "#00471B", // forest green
-  MIN: "#236192", // lake blue
-  NOP: "#85714D", // gold/tan
-  NYK: "#F58426", // orange
-  OKC: "#007AC1", // sky blue
-  ORL: "#0077C0", // magic blue
-  PHI: "#006BB6", // blue
-  PHX: "#E56020", // orange
-  POR: "#B5121B", // red
-  SAC: "#5A2D81", // purple
-  SAS: "#8A8D8F", // silver
-  TOR: "#CE1141", // red
-  UTA: "#002B5C", // navy
-  WAS: "#E31837", // red
+  ATL: "#B15A55", // brick red
+  BOS: "#2C7840", // green
+  BKN: "#484848", // charcoal
+  CHA: "#00778B", // teal
+  CHI: "#A54E55", // red
+  CLE: "#863349", // wine
+  DAL: "#355FA0", // royal blue
+  DEN: "#BE9940", // gold
+  DET: "#A34C4C", // red
+  GSW: "#2E5192", // navy blue
+  HOU: "#9D4749", // deep red
+  IND: "#1C477F", // navy
+  LAC: "#B2595F", // red
+  LAL: "#5F3E84", // purple
+  MEM: "#5871A3", // steel blue
+  MIA: "#8E3A43", // maroon
+  MIL: "#1A592C", // forest green
+  MIN: "#286697", // lake blue
+  NOP: "#816D49", // gold/tan
+  NYK: "#C47A46", // orange
+  OKC: "#2A75AE", // sky blue
+  ORL: "#2B74AD", // magic blue
+  PHI: "#2A6CA7", // blue
+  PHX: "#B96746", // orange
+  POR: "#9B4640", // red
+  SAC: "#644086", // purple
+  SAS: "#7C7F81", // silver
+  TOR: "#A54E55", // red
+  UTA: "#1F487B", // navy
+  WAS: "#AE5655", // red
   // Historical / relocated
-  NJN: "#002A60", // New Jersey Nets
+  NJN: "#1E477F", // New Jersey Nets
   NOH: "#00778C", // New Orleans Hornets (teal)
   NOK: "#00778C", // New Orleans/Oklahoma City Hornets
-  CHH: "#008CA8", // Charlotte Hornets (original teal)
-  SEA: "#00653A", // Seattle SuperSonics
-  VAN: "#00B2A9", // Vancouver Grizzlies
-  WSB: "#0E2B5C", // Washington Bullets
-  KCK: "#5A2D81", // Kansas City Kings
-  SDC: "#ED174C", // San Diego Clippers
+  CHH: "#0084A0", // Charlotte Hornets (original teal)
+  SEA: "#126D42", // Seattle SuperSonics
+  VAN: "#009D95", // Vancouver Grizzlies
+  WSB: "#28477A", // Washington Bullets
+  KCK: "#644086", // Kansas City Kings
+  SDC: "#B2595F", // San Diego Clippers
 }
 
 /** Primary brand color for a team abbreviation, or null when unmapped/TOT. */

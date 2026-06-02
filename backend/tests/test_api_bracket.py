@@ -142,6 +142,10 @@ class BracketEndpointTest(unittest.TestCase):
 
 
 class BracketKVUnavailableTest(unittest.TestCase):
+    # Brackets are ephemeral/session-only: with no KV configured (e.g. local
+    # dev) the endpoints must degrade gracefully to the orchestrator's in-memory
+    # session store, not error. KV is only an optional durability layer for
+    # surviving serverless cold starts in prod.
     def setUp(self):
         self.client = TestClient(api.app)
         self._original_kv = api._kv_redis
@@ -151,14 +155,24 @@ class BracketKVUnavailableTest(unittest.TestCase):
     def tearDown(self):
         api._kv_redis = self._original_kv
 
-    def test_create_returns_500_when_kv_unavailable(self):
-        response = self.client.post("/api/bracket", json=make_payload(4))
-        self.assertEqual(response.status_code, 500)
-        self.assertIn("KV_REST_API_URL", response.json()["detail"])
+    def test_full_lifecycle_works_in_memory_without_kv(self):
+        created = self.client.post("/api/bracket", json=make_payload(4))
+        self.assertEqual(created.status_code, 200)
+        bracket_id = created.json()["bracket_id"]
 
-    def test_get_returns_500_when_kv_unavailable(self):
+        # The just-created session is held in memory, so fetching and running it
+        # succeeds even though nothing was persisted to KV.
+        fetched = self.client.get(f"/api/bracket/{bracket_id}")
+        self.assertEqual(fetched.status_code, 200)
+
+        final = self.client.post(f"/api/bracket/{bracket_id}/run-all")
+        self.assertEqual(final.status_code, 200)
+        self.assertEqual(final.json()["status"], "COMPLETE")
+        self.assertIsNotNone(final.json()["champion"])
+
+    def test_get_unknown_bracket_returns_404_not_500(self):
         response = self.client.get("/api/bracket/anything")
-        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.status_code, 404)
 
 
 class DefaultBracketEndpointTest(unittest.TestCase):

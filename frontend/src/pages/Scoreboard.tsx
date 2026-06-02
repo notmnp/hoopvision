@@ -78,12 +78,11 @@ const Scoreboard = () => {
 
   return (
     <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-screen-xl flex-col px-4 py-8 md:px-6">
-      <header className="animate-in fade-in slide-in-from-bottom-4 duration-700 [animation-fill-mode:both] mb-8">
-        <Kicker ruled>Live From Around the League</Kicker>
-        <div className="mt-2 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-          <div>
-            <h1 className="display text-5xl sm:text-6xl">Tonight's Slate</h1>
-            <p className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 font-condensed text-[0.78rem] font-bold uppercase tracking-[0.14em] text-muted-foreground">
+      <header className="mb-6 flex flex-col gap-4 pb-6 duration-700 animate-in fade-in slide-in-from-bottom-4 [animation-fill-mode:both] md:flex-row md:items-end md:justify-between">
+        <div>
+          <Kicker ruled>Live From Around the League</Kicker>
+          <h1 className="mt-2 display text-5xl sm:text-6xl">Tonight's Slate</h1>
+          <p className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 font-condensed text-[0.78rem] font-bold uppercase tracking-[0.14em] text-muted-foreground">
               <span>{DATELINE}</span>
               {!loading && !error && games.length > 0 && (
                 <>
@@ -109,10 +108,9 @@ const Scoreboard = () => {
                 </>
               )}
             </p>
-          </div>
         </div>
-        <Rule weight="double" className="mt-5" />
       </header>
+      <Rule weight="double" className="mb-6" />
 
       {loading && (
         <>

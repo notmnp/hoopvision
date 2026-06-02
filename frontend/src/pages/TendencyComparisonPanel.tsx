@@ -3,7 +3,12 @@ import { ScatterChart } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Kicker, Rule } from "@/components/editorial"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import { Kicker } from "@/components/editorial"
 import { cn } from "@/lib/utils"
 import { PlayerProfile } from "@/hooks/usePlayerSearch"
 import { PlayerSeasonStats } from "@/hooks/usePlayerSeasons"
@@ -45,38 +50,37 @@ export default function TendencyComparisonPanel({
 
   return (
     <Card className="mt-6 rounded-sm border bg-card">
-      <CardHeader className="space-y-2">
+      <CardHeader>
         <Kicker ruled>Head to Head</Kicker>
-        <CardTitle className="font-display text-3xl font-black uppercase tracking-tight sm:text-4xl">
-          By the Numbers
-        </CardTitle>
-        <p className="font-display text-sm italic leading-relaxed text-muted-foreground">
-          Where the matchup is won and lost.
-        </p>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        {/* Header row: each player's name, season, and shot-chart trigger. */}
-        <div className="grid grid-cols-[1fr_auto_1fr] items-start gap-3">
-          <PlayerHeading
-            align="left"
-            name={playerA.name}
-            season={seasonA}
-            onViewShotChart={() => onViewShotChart(playerA, seasonA)}
-          />
-          <div className="flex flex-col items-center self-stretch">
-            <span className="font-display text-2xl font-black italic leading-none text-muted-foreground/50">
+        {/* Title on the left; the matchup (each player's name · season + a
+            shot-chart icon) rides the same line on the right, flanking "vs." */}
+        <div className="flex flex-col gap-x-6 gap-y-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="space-y-2">
+            <CardTitle className="font-display text-3xl font-black uppercase tracking-tight sm:text-4xl">
+              By the Numbers
+            </CardTitle>
+            <p className="font-display text-sm italic leading-relaxed text-muted-foreground">
+              Where the matchup is won and lost.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <PlayerHeading
+              name={playerA.name}
+              season={seasonA}
+              onViewShotChart={() => onViewShotChart(playerA, seasonA)}
+            />
+            <span className="font-display text-xl font-black italic leading-none text-muted-foreground/50">
               vs.
             </span>
-            <Rule vertical className="mt-1 flex-1" />
+            <PlayerHeading
+              name={playerB.name}
+              season={seasonB}
+              onViewShotChart={() => onViewShotChart(playerB, seasonB)}
+            />
           </div>
-          <PlayerHeading
-            align="right"
-            name={playerB.name}
-            season={seasonB}
-            onViewShotChart={() => onViewShotChart(playerB, seasonB)}
-          />
         </div>
-
+      </CardHeader>
+      <CardContent className="space-y-6">
         {/* Scoring & shooting — efficiency/rate metrics the player cards (which
             show raw per-game volume) don't surface. */}
         <Section title="The Scoring Case">
@@ -183,45 +187,34 @@ export default function TendencyComparisonPanel({
 function PlayerHeading({
   name,
   season,
-  align,
   onViewShotChart,
 }: {
   name: string
   season: string
-  align: "left" | "right"
   onViewShotChart: () => void
 }) {
   return (
-    <div
-      className={cn(
-        "flex flex-col gap-2.5",
-        align === "right" ? "items-end text-right" : "items-start text-left"
-      )}
-    >
-      <div>
-        <div className="truncate display text-xl leading-none">{name}</div>
-        <div className="mt-1.5 kicker text-muted-foreground">
-          {season} season
-        </div>
+    // Compact inline unit so it can ride the title's line: name · season + a
+    // shot-chart icon (label moved to a tooltip to keep the row tight).
+    <div className="flex items-center gap-2.5">
+      <div className="leading-tight">
+        <div className="display text-lg leading-none">{name}</div>
+        <div className="mt-1 kicker text-muted-foreground">{season} season</div>
       </div>
-      {/* Pulled toward the center divider — flanking the "vs." rather than
-          hanging off the outer edges. */}
-      <div
-        className={cn(
-          "flex w-full",
-          align === "left" ? "justify-end" : "justify-start"
-        )}
-      >
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-8 gap-1.5 border-foreground/30 bg-background/60 font-condensed text-[0.7rem] font-bold uppercase tracking-[0.14em] hover:bg-foreground hover:text-background"
-          onClick={onViewShotChart}
-        >
-          <ScatterChart className="h-3.5 w-3.5 text-primary" />
-          Shot Chart
-        </Button>
-      </div>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label={`View ${name} shot chart`}
+            className="size-8 shrink-0 border-foreground/30 bg-background/60 hover:bg-foreground hover:text-background"
+            onClick={onViewShotChart}
+          >
+            <ScatterChart className="h-3.5 w-3.5 text-primary" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Shot chart</TooltipContent>
+      </Tooltip>
     </div>
   )
 }

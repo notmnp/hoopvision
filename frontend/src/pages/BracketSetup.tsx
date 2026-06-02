@@ -190,7 +190,11 @@ export default function BracketWorkspace() {
   const [loading, setLoading] = useState(false)
   const [loadingDefault, setLoadingDefault] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [simulating, setSimulating] = useState(false)
+  // Which run action is in flight, so only the clicked button shows a spinner
+  // (a single boolean made both "Simulate Round" and "Simulate All" spin).
+  const [runningStep, setRunningStep] = useState<"run-round" | "run-all" | null>(
+    null
+  )
   const [exporting, setExporting] = useState(false)
   const [loadingPreset, setLoadingPreset] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -348,8 +352,8 @@ export default function BracketWorkspace() {
   }
 
   async function runStep(path: "run-round" | "run-all") {
-    if (!bracketId || simulating) return
-    setSimulating(true)
+    if (!bracketId || runningStep) return
+    setRunningStep(path)
     setError(null)
     try {
       // Both run endpoints return the updated BracketState, so use it directly.
@@ -360,7 +364,7 @@ export default function BracketWorkspace() {
     } catch (caught) {
       setError(getBracketError(caught, "Failed to simulate."))
     } finally {
-      setSimulating(false)
+      setRunningStep(null)
     }
   }
 
@@ -415,37 +419,16 @@ export default function BracketWorkspace() {
   const complete = bracketState?.status === "COMPLETE"
 
   return (
-    <div className="relative mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-screen-xl flex-col px-4 py-8 md:px-6">
-      {/* Court geometry + dot grid behind the page header only */}
-      <svg
-        aria-hidden
-        viewBox="0 0 1200 600"
-        preserveAspectRatio="xMidYMin slice"
-        className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[320px] w-full text-foreground/[0.05] dark:text-foreground/[0.07]"
-        fill="none"
-      >
-        <circle cx="600" cy="-40" r="210" stroke="currentColor" strokeWidth="2" />
-        <path
-          d="M 120 -20 A 480 480 0 0 0 1080 -20"
-          stroke="oklch(0.646 0.222 41 / 0.12)"
-          strokeWidth="2"
-        />
-        <line x1="0" y1="1" x2="1200" y2="1" stroke="currentColor" strokeWidth="2" />
-      </svg>
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[320px] bg-[radial-gradient(circle,_oklch(0.6_0_0_/_0.12)_1px,_transparent_1px)] [background-size:26px_26px] [mask-image:linear-gradient(to_bottom,black,transparent_70%)]"
-      />
-
+    <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-screen-xl flex-col px-4 py-8 md:px-6">
       {running && bracketState ? (
         <>
-          <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-            <div className="flex flex-col items-start gap-2 animate-in fade-in slide-in-from-bottom-4 duration-700 [animation-fill-mode:both] motion-reduce:animate-none">
+          <div className="mb-6 flex flex-col gap-4 pb-6 animate-in fade-in slide-in-from-bottom-4 duration-700 [animation-fill-mode:both] motion-reduce:animate-none md:flex-row md:items-end md:justify-between">
+            <div>
               <Kicker ruled>The Road to GOAT</Kicker>
-              <h1 className="display text-5xl sm:text-6xl">
+              <h1 className="mt-2 display text-5xl sm:text-6xl">
                 {complete ? "Champion Crowned" : "The Bracket"}
               </h1>
-              <div className="flex flex-wrap items-center gap-2.5">
+              <div className="mt-3 flex flex-wrap items-center gap-2.5">
                 <span className="font-condensed text-[0.78rem] font-bold uppercase tracking-[0.14em] tabular-nums text-muted-foreground">
                   {bracketState.bracket_size}-player · Bo{bracketState.series_format}
                 </span>
@@ -453,54 +436,60 @@ export default function BracketWorkspace() {
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant="outline"
-                onClick={startNew}
-                className="font-condensed uppercase tracking-[0.14em]"
-              >
-                <Plus className="h-4 w-4" />
-                New bracket
-              </Button>
-              <Button
-                onClick={() => runStep("run-round")}
-                disabled={complete || simulating}
-                className="font-condensed uppercase tracking-[0.14em]"
-              >
-                {simulating ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <PlayCircle className="h-4 w-4" />
-                )}
-                Simulate Round
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => runStep("run-all")}
-                disabled={complete || simulating}
-                className="font-condensed uppercase tracking-[0.14em]"
-              >
-                {simulating ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <FastForward className="h-4 w-4" />
-                )}
-                Simulate All
-              </Button>
-              <Button
-                variant="outline"
-                onClick={handleExport}
-                disabled={exporting}
-                title="Download a poster of your champion"
-                className="font-condensed uppercase tracking-[0.14em]"
-              >
-                {exporting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Download className="h-4 w-4" />
-                )}
-                Print the Cover
-              </Button>
+            <div className="flex flex-col items-end gap-2">
+              {/* Download poster sits a row above, anchored to the top-right —
+                  only once there's a champion to print. */}
+              {complete && (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={handleExport}
+                  disabled={exporting}
+                  title="Download a poster of your champion"
+                  aria-label="Download a poster of your champion"
+                >
+                  {exporting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4" />
+                  )}
+                </Button>
+              )}
+              <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                <Button
+                  variant="outline"
+                  onClick={startNew}
+                  className="font-condensed font-bold uppercase tracking-[0.14em]"
+                >
+                  <Plus className="h-4 w-4" />
+                  New bracket
+                </Button>
+                <Button
+                  onClick={() => runStep("run-round")}
+                  disabled={complete || runningStep !== null}
+                  className="font-condensed font-bold uppercase tracking-[0.14em]"
+                >
+                  {runningStep === "run-round" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <PlayCircle className="h-4 w-4" />
+                  )}
+                  Simulate Round
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => runStep("run-all")}
+                  disabled={complete || runningStep !== null}
+                  className="font-condensed font-bold uppercase tracking-[0.14em]"
+                >
+                  {runningStep === "run-all" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <FastForward className="h-4 w-4" />
+                  )}
+                  Simulate All
+                </Button>
+              </div>
             </div>
           </div>
           <Rule weight="double" className="mb-6" />
@@ -519,16 +508,39 @@ export default function BracketWorkspace() {
         </>
       ) : (
         <>
-          <div className="mb-4 flex flex-col items-start gap-2 animate-in fade-in slide-in-from-bottom-4 duration-700 [animation-fill-mode:both] motion-reduce:animate-none">
-            <Kicker ruled>The Road to GOAT</Kicker>
-            <h1 className="display text-5xl sm:text-6xl">Draft the Field</h1>
-            <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 font-condensed text-[0.78rem] font-bold uppercase tracking-[0.14em] text-muted-foreground">
-              <span>Drop a field</span>
-              <span aria-hidden>·</span>
-              <span>Tune the matchups</span>
-              <span aria-hidden>·</span>
-              <span>Settle it on the floor</span>
-            </p>
+          <div className="mb-6 flex flex-col gap-4 pb-6 animate-in fade-in slide-in-from-bottom-4 duration-700 [animation-fill-mode:both] motion-reduce:animate-none md:flex-row md:items-end md:justify-between">
+            <div>
+              <Kicker ruled>The Road to GOAT</Kicker>
+              <h1 className="mt-2 display text-5xl sm:text-6xl">Build your Tournament</h1>
+              <p className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 font-condensed text-[0.78rem] font-bold uppercase tracking-[0.14em] text-muted-foreground">
+                <span>Drop a field</span>
+                <span aria-hidden>·</span>
+                <span>Tune the matchups</span>
+                <span aria-hidden>·</span>
+                <span>Settle it on the floor</span>
+              </p>
+            </div>
+            {/* Bracket shape (field size + best-of) stacked top-right, exactly
+                where ISO Lab puts its possession toggle + Random matchup. */}
+            <div className="flex flex-col items-stretch gap-3 sm:items-end">
+              <SegmentedControl
+                label="Field size"
+                options={BRACKET_SIZES.map((value) => ({ value, label: `${value}` }))}
+                value={size}
+                onChange={(value) => changeSize(value as BracketSize)}
+                disabled={busy}
+              />
+              <SegmentedControl
+                label="Series format"
+                options={SERIES_FORMATS.map((value) => ({
+                  value,
+                  label: `Bo${value}`,
+                }))}
+                value={seriesFormat}
+                onChange={(value) => setSeriesFormat(value as SeriesFormat)}
+                disabled={busy}
+              />
+            </div>
           </div>
           <Rule weight="double" className="mb-6" />
 
@@ -542,36 +554,29 @@ export default function BracketWorkspace() {
             </Alert>
           )}
 
-          <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
-            {/* The Field Office: a sticky command rail for fast field-building,
-                format selection, live readiness, and the Tip Off CTA. */}
-            <aside className="w-full shrink-0 lg:sticky lg:top-6 lg:w-72">
-              <FieldOffice
-                size={size}
-                seriesFormat={seriesFormat}
-                filledCount={filledCount}
-                allFilled={allFilled}
-                busy={busy}
-                submitting={submitting}
-                loadingDefault={loadingDefault}
-                loadingPreset={loadingPreset}
-                onChangeSize={(value) => changeSize(value)}
-                onChangeFormat={(value) => setSeriesFormat(value)}
-                onAutofill={loadPreconfigured}
-                onLoadPreset={loadPreset}
-                onClear={clearField}
-                onTipOff={simulate}
-              />
-            </aside>
+          <div className="flex flex-col gap-6">
+            {/* Field-building bar above the matchups: instant fields + autofill,
+                live readiness, and the gated Tip Off CTA. */}
+            <FieldControls
+              size={size}
+              filledCount={filledCount}
+              allFilled={allFilled}
+              busy={busy}
+              submitting={submitting}
+              loadingDefault={loadingDefault}
+              loadingPreset={loadingPreset}
+              onAutofill={loadPreconfigured}
+              onLoadPreset={loadPreset}
+              onClear={clearField}
+              onTipOff={simulate}
+            />
 
-            <div className="min-w-0 flex-1">
-              <BracketBuilder
-                size={size}
-                slots={slots}
-                onUpdateSlot={updateSlot}
-                disabled={busy}
-              />
-            </div>
+            <BracketBuilder
+              size={size}
+              slots={slots}
+              onUpdateSlot={updateSlot}
+              disabled={busy}
+            />
           </div>
         </>
       )}
@@ -579,191 +584,130 @@ export default function BracketWorkspace() {
   )
 }
 
-// The setup-phase command rail. Keeps every field-building affordance in one
-// readable column: instant preset fields + autofill, the size/format dials, a
-// live "X / N seeded" readout, and the gated Tip Off CTA that spells out
-// exactly what's missing.
-function FieldOffice({
+// The setup-phase field-building bar that sits above the matchups (the size /
+// best-of dials live up in the page header, mirroring ISO Lab's possession
+// toggle). Left: instant preset fields + autofill + clear. Right: live "X / N
+// seeded" readiness and the gated Tip Off CTA that spells out what's missing.
+function FieldControls({
   size,
-  seriesFormat,
   filledCount,
   allFilled,
   busy,
   submitting,
   loadingDefault,
   loadingPreset,
-  onChangeSize,
-  onChangeFormat,
   onAutofill,
   onLoadPreset,
   onClear,
   onTipOff,
 }: {
   size: BracketSize
-  seriesFormat: SeriesFormat
   filledCount: number
   allFilled: boolean
   busy: boolean
   submitting: boolean
   loadingDefault: boolean
   loadingPreset: string | null
-  onChangeSize: (size: BracketSize) => void
-  onChangeFormat: (format: SeriesFormat) => void
   onAutofill: () => void
   onLoadPreset: (preset: FieldPreset) => void
   onClear: () => void
   onTipOff: () => void
 }) {
   const remaining = size - filledCount
-  const progress = size ? filledCount / size : 0
   const hasAny = filledCount > 0
 
   return (
-    <div className="flex flex-col gap-6 rounded-sm border bg-card p-5">
-      {/* Readiness meter */}
-      <div className="flex flex-col gap-2">
-        <div className="flex items-baseline justify-between">
-          <Kicker tone="muted">The Field</Kicker>
-          <span className="font-display text-sm font-black uppercase tabular-nums">
-            <span className={allFilled ? "text-primary" : "text-foreground"}>
-              {filledCount}
-            </span>
-            <span className="text-muted-foreground"> / {size} seeded</span>
-          </span>
+    <div className="flex flex-col gap-4 rounded-sm border bg-card p-4 lg:flex-row lg:items-end lg:justify-between">
+      {/* Drop a field: autofill + curated presets as a wrapping chip row. Clear
+          rides the label line so it never spills onto its own row. */}
+      <div className="flex min-w-0 flex-col gap-2">
+        {/* Fixed-height label line so toggling Clear in/out never shifts the
+            chips below it. */}
+        <div className="flex h-6 items-center justify-between gap-3">
+          <Kicker tone="muted">Drop a Field</Kicker>
+          {hasAny && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onClear}
+              disabled={busy}
+              className="h-6 px-1.5 font-condensed text-[0.7rem] font-bold uppercase tracking-[0.14em] text-muted-foreground hover:text-destructive"
+            >
+              <Eraser className="h-3.5 w-3.5" />
+              Clear
+            </Button>
+          )}
         </div>
-        <div
-          className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={size}
-          aria-valuenow={filledCount}
-        >
-          <div
-            className={cn(
-              "h-full rounded-full transition-[width] duration-500 ease-out motion-reduce:transition-none",
-              allFilled ? "bg-primary" : "bg-foreground/40"
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            onClick={onAutofill}
+            disabled={busy}
+            variant="secondary"
+            size="sm"
+            className="font-condensed font-bold uppercase tracking-[0.14em]"
+          >
+            {loadingDefault ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Sparkles className="h-4 w-4" />
             )}
-            style={{ width: `${progress * 100}%` }}
-          />
-        </div>
-        <p className="font-sans text-xs leading-snug text-muted-foreground">
-          {allFilled ? (
-            <span className="font-semibold text-primary">
-              Field set — ready to tip off.
-            </span>
-          ) : (
-            <>
-              <span className="tabular-nums font-semibold text-foreground">
-                {remaining}
-              </span>{" "}
-              {remaining === 1 ? "seat" : "seats"} still open.
-            </>
-          )}
-        </p>
-      </div>
-
-      {/* Instant fields */}
-      <div className="flex flex-col gap-2.5">
-        <Kicker tone="muted">Drop a Field</Kicker>
-        <Button
-          onClick={onAutofill}
-          disabled={busy}
-          className="w-full justify-start font-condensed uppercase tracking-[0.14em]"
-        >
-          {loadingDefault ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Sparkles className="h-4 w-4" />
-          )}
-          Autofill the Legends
-        </Button>
-        <div className="flex flex-col gap-1.5">
+            Autofill
+          </Button>
           {FIELD_PRESETS.map((preset) => (
             <button
               key={preset.id}
               type="button"
+              title={preset.blurb}
               onClick={() => onLoadPreset(preset)}
               disabled={busy}
               className={cn(
-                "group flex flex-col items-start gap-0.5 rounded-sm border border-border bg-background px-3 py-2 text-left transition-colors",
+                "inline-flex h-8 items-center gap-1.5 rounded-sm border border-border bg-background px-3 font-condensed text-xs font-bold uppercase tracking-[0.14em] transition-colors",
                 "hover:border-primary hover:bg-primary/5",
                 "disabled:cursor-not-allowed disabled:opacity-50"
               )}
             >
-              <span className="flex w-full items-center justify-between gap-2">
-                <span className="font-display text-sm font-bold uppercase leading-none tracking-tight">
-                  {preset.label}
-                </span>
-                {loadingPreset === preset.id ? (
-                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
-                ) : (
-                  <span className="font-display text-sm font-black tabular-nums text-muted-foreground group-hover:text-primary">
-                    →
-                  </span>
-                )}
-              </span>
-              <span className="font-sans text-xs leading-snug text-muted-foreground">
-                {preset.blurb}
-              </span>
+              {loadingPreset === preset.id && (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+              )}
+              {preset.label}
             </button>
           ))}
         </div>
-        {hasAny && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onClear}
-            disabled={busy}
-            className="h-7 justify-start px-2 font-condensed text-xs uppercase tracking-[0.14em] text-muted-foreground hover:text-destructive"
+      </div>
+
+      {/* Readiness + Tip Off, mirroring ISO Lab's ready dot + run button. */}
+      <div className="flex items-center justify-between gap-3 lg:shrink-0 lg:justify-end">
+        <span className="flex items-center gap-2">
+          <span
+            className={cn(
+              "size-2 shrink-0 rounded-full",
+              allFilled ? "bg-court" : "bg-muted-foreground/40"
+            )}
+            aria-hidden
+          />
+          <span
+            className={cn(
+              "kicker tabular-nums",
+              allFilled ? "text-foreground" : "text-muted-foreground"
+            )}
           >
-            <Eraser className="h-3.5 w-3.5" />
-            Clear the field
-          </Button>
-        )}
-      </div>
-
-      <Rule />
-
-      {/* Dials */}
-      <div className="flex flex-wrap items-end gap-x-8 gap-y-5">
-        <SegmentedControl
-          label="Field size"
-          options={BRACKET_SIZES.map((value) => ({ value, label: `${value}` }))}
-          value={size}
-          onChange={(value) => onChangeSize(value as BracketSize)}
-          disabled={busy}
-        />
-        <SegmentedControl
-          label="Series format"
-          options={SERIES_FORMATS.map((value) => ({
-            value,
-            label: `Bo${value}`,
-          }))}
-          value={seriesFormat}
-          onChange={(value) => onChangeFormat(value as SeriesFormat)}
-          disabled={busy}
-        />
-      </div>
-
-      <Rule />
-
-      {/* Tip Off */}
-      <div className="flex flex-col gap-2">
+            {allFilled ? "Field set" : `${filledCount} / ${size} seeded`}
+          </span>
+        </span>
         <Tooltip>
           <TooltipTrigger asChild>
             {/* Wrapped in a span so the tooltip still fires while the button is
                 disabled (disabled controls emit no hover). */}
-            <span className="flex w-full">
+            <span className="flex">
               <Button
-                size="lg"
                 onClick={onTipOff}
                 disabled={!allFilled || busy}
-                className="w-full font-condensed text-base uppercase tracking-[0.14em]"
+                className="font-condensed font-bold uppercase tracking-[0.14em]"
               >
                 {submitting ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <Swords className="h-5 w-5" />
+                  <Swords className="h-4 w-4" />
                 )}
                 Tip Off →
               </Button>
@@ -777,11 +721,6 @@ function FieldOffice({
             </TooltipContent>
           )}
         </Tooltip>
-        {!allFilled && (
-          <p className="text-center font-sans text-xs leading-snug text-muted-foreground">
-            Fill every seat to start the tournament.
-          </p>
-        )}
       </div>
     </div>
   )
@@ -801,24 +740,32 @@ function SegmentedControl({
   disabled?: boolean
 }) {
   return (
-    <div className="flex flex-col gap-2">
+    // Same segmented-pill treatment as ISO Lab's PossessionModeToggle: a
+    // hairline-bordered track with the active option lifted onto the page
+    // surface in vermillion, right-aligned in the header on sm+.
+    <div className="flex flex-col gap-1.5 sm:items-end">
       <span className="kicker text-muted-foreground">{label}</span>
-      <div className="inline-flex items-end gap-1 border-b border-border">
+      <div
+        role="radiogroup"
+        aria-label={label}
+        className="inline-flex rounded-sm border bg-muted/40 p-0.5"
+      >
         {options.map((option) => {
           const active = option.value === value
           return (
             <button
               key={option.value}
               type="button"
+              role="radio"
+              aria-checked={active}
               disabled={disabled}
-              aria-pressed={active}
               onClick={() => onChange(option.value)}
               className={cn(
-                "min-w-[3rem] -mb-px border-b-2 px-3 pb-1.5 pt-1 font-display text-xl font-black uppercase tabular-nums transition-colors",
+                "inline-flex items-center justify-center rounded-sm px-4 py-1.5 font-condensed text-xs font-bold uppercase tracking-[0.14em] tabular-nums transition-colors",
                 "disabled:cursor-not-allowed disabled:opacity-50",
                 active
-                  ? "border-primary text-primary"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
+                  ? "bg-background text-primary shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
               )}
             >
               {option.label}
