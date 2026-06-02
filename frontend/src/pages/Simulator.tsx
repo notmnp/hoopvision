@@ -2,18 +2,26 @@ import {
   CSSProperties,
   Fragment,
   ReactNode,
+  useCallback,
   useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
 } from "react"
+import { useSearchParams } from "react-router-dom"
 import axios from "axios"
 import { API_BASE_URL } from "@/lib/config"
 import {
   AlertTriangle,
   CalendarDays,
+  ChevronDown,
+  Dices,
+  Info,
+  ListOrdered,
   Loader2,
   MoveHorizontal,
+  Pencil,
   Percent,
   Repeat,
   RotateCcw,
@@ -21,23 +29,22 @@ import {
   Shuffle,
   Sparkles,
   Swords,
-  Trophy,
   UserRound,
   Weight,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { getTeamColor, getTeamLogoUrl, withAlpha } from "@/lib/teamColors"
+import { peakSeason } from "@/lib/peakSeasons"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
   CardContent,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card"
 import { PlayerSearchCombobox } from "@/components/PlayerSearchCombobox"
+import { HalftoneAvatar, Kicker, Rule } from "@/components/editorial"
 import {
   Select,
   SelectContent,
@@ -82,22 +89,22 @@ const POSSESSION_MODES: {
   {
     value: "make_it_take_it",
     label: "Winners",
-    hint: "Scorer keeps the ball",
+    hint: "Winner's ball — score and you keep possession (make-it-take-it).",
     icon: Repeat,
   },
   {
     value: "alternating",
     label: "Losers",
-    hint: "Ball changes hands every possession",
+    hint: "Loser's ball — get scored on and you get it back (possession alternates).",
     icon: Shuffle,
   },
 ]
 
 const CONFIDENCE_TOOLTIPS: Record<ConfidenceTier, string> = {
-  HIGH: "HIGH confidence: sufficient matchup tracking data available for this player.",
+  HIGH: "VERIFIED: sufficient matchup tracking data available for this player.",
   MEDIUM:
-    "MEDIUM confidence: post-tracking era player with limited observed data.",
-  LOW: "LOW confidence: pre-tracking era or statistical outlier — model-generalized profile.",
+    "ON RECORD: post-tracking era player with limited observed data.",
+  LOW: "ESTIMATED: pre-tracking era or statistical outlier — model-generalized profile.",
 }
 
 interface BulkSimulationResult {
@@ -135,6 +142,41 @@ const QUICK_PICKS_B: QuickPick[] = [
   { id: 406, name: "Shaquille O'Neal" },
 ]
 
+// Curated classic rivalries for the "Surprise me" shuffle and the sample bout
+// shown on a cold (no-params) arrival. Names resolve through the same /player
+// search as a typed pick; `tag` is the editorial billing for the verdict-style
+// header. The first entry doubles as the default featured matchup. Seasons are
+// optional — when omitted each corner defaults to the player's peak season (see
+// peakSeasons), which is the case for every curated rivalry below.
+type Rivalry = {
+  tag: string
+  a: string
+  b: string
+  seasonA?: string
+  seasonB?: string
+}
+
+const RIVALRIES: Rivalry[] = [
+  { tag: "The Main Event", a: "Michael Jordan", b: "LeBron James" },
+  { tag: "Era Clash", a: "Stephen Curry", b: "Magic Johnson" },
+  { tag: "The Co-Main", a: "Kobe Bryant", b: "Kevin Durant" },
+  { tag: "In the Trenches", a: "Shaquille O'Neal", b: "Hakeem Olajuwon" },
+  { tag: "Lead Guards", a: "Allen Iverson", b: "Stephen Curry" },
+  { tag: "Greek Freak vs. Legend", a: "Giannis Antetokounmpo", b: "Larry Bird" },
+  { tag: "Flash vs. Bird", a: "Dwyane Wade", b: "Larry Bird" },
+]
+
+// A request from the controller to load a named player into the slot (used by
+// deep-link preload and the "Surprise me" shuffle). The `token` makes each
+// request unique so repeating the same name still re-fires the effect. An
+// optional `season` pins the corner to a specific season_id (e.g. a peak
+// season); when absent or unavailable the slot falls back to the most recent.
+interface PreloadRequest {
+  name: string
+  season?: string
+  token: number
+}
+
 interface PlayerSlotProps {
   label: SlotLabel
   selectedPlayer: PlayerProfile | null
@@ -144,6 +186,12 @@ interface PlayerSlotProps {
   onSeasonSelect: (seasonId: string | null) => void
   onSeasonStatsChange?: (stats: PlayerSeasonStats | null) => void
   confidenceTier?: ConfidenceTier | null
+  // When set, the slot resolves this name via the same path as a quick-pick.
+  preload?: PreloadRequest | null
+  onPreloadHandled?: () => void
+  // Results mode: collapse the heavy vitals + season stat-bar body to keep just
+  // the player identity header + season selector, so the verdict is the hero.
+  compact?: boolean
 }
 
 function PlayerSelectionController() {
@@ -166,16 +214,124 @@ function PlayerSelectionController() {
   const [simulationError, setSimulationError] = useState<string | null>(null)
   const [bulkResult, setBulkResult] = useState<BulkSimulationResult | null>(null)
   const [bulkLoading, setBulkLoading] = useState(false)
+  // Preload requests pushed down into each slot (deep-link + "Surprise me").
+  const [preloadA, setPreloadA] = useState<PreloadRequest | null>(null)
+  const [preloadB, setPreloadB] = useState<PreloadRequest | null>(null)
+  // Editorial billing for the active sample/shuffled bout, shown until the user
+  // edits a corner. Cleared on any manual change so it never lies.
+  const [billing, setBilling] = useState<string | null>(null)
+  // Tip-off reveal beat: a brief overlay flashed before results land. It plays
+  // only on the FIRST single-game run for a given matchup — `hasTippedOff`
+  // tracks that and resets whenever the matchup (either player) changes or a
+  // fresh bout is loaded, so a brand-new pairing earns the dramatic intro again.
+  // The tip-off content (the two names + optional editorial billing) and a
+  // separate visibility flag so the overlay can fade out while the content
+  // stays mounted through the transition.
+  const [tipOffData, setTipOffData] = useState<{
+    a: string
+    b: string
+    tag?: string
+  } | null>(null)
+  const [tipOffShow, setTipOffShow] = useState(false)
+  const hasTippedOff = useRef(false)
+  const tipOffTimer = useRef<number | null>(null)
+  // Progressive disclosure: once a result exists, the setup detail (per-game
+  // stat bars + the By-the-Numbers comparison) and the full play-by-play start
+  // collapsed so the verdict + box score are the calm hero. Both re-expand on tap.
+  const [setupExpanded, setSetupExpanded] = useState(false)
+  const [playByPlayOpen, setPlayByPlayOpen] = useState(false)
+  const [searchParams] = useSearchParams()
   // A matchup is only runnable once both players are confirmed AND each has a
   // season selected (AC-ISO-001.6 / AC-ISO-006.1).
   const canRunSimulation = Boolean(playerA && playerB && seasonA && seasonB)
   const busy = simulationLoading || bulkLoading
+  // "Results mode": a single-game or 1,000-sim result exists, so the pre-run
+  // setup detail is de-emphasized behind an "edit matchup" toggle.
+  const hasResults = Boolean(simulationResult || bulkResult)
+  // Surfaced in the ready banner and the disabled-run tooltip.
+  const readyHint = runRequirementHint(playerA, playerB, seasonA, seasonB)
+
+  const tokenRef = useRef(0)
+  const nextToken = () => ++tokenRef.current
+
+  // Load a curated rivalry (or a deep-linked pair) into both corners by pushing
+  // a preload request into each slot — they resolve names via the same search
+  // path as the quick-pick tiles, which auto-selects each default season.
+  const loadBout = useCallback((rivalry: Rivalry) => {
+    // Each corner loads at its explicit season when given, otherwise the
+    // player's peak season — never just "most recent".
+    setPreloadA({
+      name: rivalry.a,
+      season: rivalry.seasonA ?? peakSeason(rivalry.a),
+      token: nextToken(),
+    })
+    setPreloadB({
+      name: rivalry.b,
+      season: rivalry.seasonB ?? peakSeason(rivalry.b),
+      token: nextToken(),
+    })
+    setBilling(rivalry.tag)
+    // Fresh bout (deep-link / Surprise me / sample) is a new matchup — re-arm
+    // the dramatic tip-off intro.
+    hasTippedOff.current = false
+  }, [])
+
+  // Play the dramatic "tip-off" beat: a blurred full-bleed flash framing the
+  // two names, with the editorial billing fading in above them a touch later.
+  // Skipped entirely for reduced-motion users.
+  const playTipOff = useCallback((a: string, b: string, tag?: string) => {
+    if (prefersReducedMotion()) return
+    setTipOffData({ a, b, tag })
+    setTipOffShow(true)
+    if (tipOffTimer.current !== null) {
+      window.clearTimeout(tipOffTimer.current)
+    }
+    tipOffTimer.current = window.setTimeout(() => {
+      setTipOffShow(false)
+      tipOffTimer.current = null
+    }, 2000)
+  }, [])
+
+  function surpriseMe() {
+    const pick = RIVALRIES[Math.floor(Math.random() * RIVALRIES.length)]
+    loadBout(pick)
+    // Same tip-off reveal as a first run, billed with the rivalry's nickname.
+    playTipOff(pick.a, pick.b, pick.tag)
+  }
+
+  // Deep-link / cold-start preload, run exactly once on mount. With ?a=&b= we
+  // honor the requested matchup (?sa=&sb= pin each corner's season, e.g. the
+  // peak seasons the homepage debates pass); with neither we drop in a featured
+  // sample bout so the page is never empty (clearly labeled and fully swappable).
+  const didPreload = useRef(false)
+  useEffect(() => {
+    if (didPreload.current) return
+    didPreload.current = true
+    const a = searchParams.get("a")?.trim()
+    const b = searchParams.get("b")?.trim()
+    const sa = searchParams.get("sa")?.trim() || undefined
+    const sb = searchParams.get("sb")?.trim() || undefined
+    if (a && b) {
+      loadBout({ tag: "Your Matchup", a, b, seasonA: sa, seasonB: sb })
+    } else if (a || b) {
+      // Only one corner specified — fill it (at its requested or peak season)
+      // and leave the other for the user.
+      if (a) setPreloadA({ name: a, season: sa ?? peakSeason(a), token: nextToken() })
+      if (b) setPreloadB({ name: b, season: sb ?? peakSeason(b), token: nextToken() })
+      setBilling("Pick a challenger")
+    } else {
+      loadBout({ ...RIVALRIES[0], tag: "Sample bout — swap in anyone" })
+    }
+  }, [searchParams, loadBout])
 
   function selectPlayerA(player: PlayerProfile | null) {
     setPlayerA(player)
     setSeasonA(null)
     setBulkResult(null)
     setSimulationResult(null)
+    setBilling(null)
+    // New matchup — re-arm the dramatic tip-off intro.
+    hasTippedOff.current = false
   }
 
   function selectPlayerB(player: PlayerProfile | null) {
@@ -183,6 +339,9 @@ function PlayerSelectionController() {
     setSeasonB(null)
     setBulkResult(null)
     setSimulationResult(null)
+    setBilling(null)
+    // New matchup — re-arm the dramatic tip-off intro.
+    hasTippedOff.current = false
   }
 
   function selectSeasonA(seasonId: string | null) {
@@ -204,6 +363,14 @@ function PlayerSelectionController() {
 
     setSimulationLoading(true)
     setSimulationError(null)
+    // Dramatic name-vs-name "tip-off" beat — shown only the FIRST time this
+    // matchup is run (Surprise me triggers its own). Every re-run ("Run it
+    // back") and the bulk 1,000-sim fall back to the simpler button/action-bar
+    // spinner instead. Non-blocking (the sim is already in flight above).
+    if (!hasTippedOff.current) {
+      hasTippedOff.current = true
+      playTipOff(playerA.name, playerB.name, billing ?? undefined)
+    }
 
     try {
       const response = await axios.post<SimulationResult>(
@@ -217,6 +384,9 @@ function PlayerSelectionController() {
         }
       )
       setSimulationResult(response.data)
+      // Land in the calm results view: setup detail + diary start collapsed.
+      setSetupExpanded(false)
+      setPlayByPlayOpen(false)
     } catch (error) {
       setSimulationError(getSimulationError(error))
     } finally {
@@ -245,6 +415,7 @@ function PlayerSelectionController() {
         }
       )
       setBulkResult(response.data)
+      setSetupExpanded(false)
     } catch (error) {
       // Fall back to looping the single-simulation endpoint client-side when
       // the bulk endpoint is unavailable (e.g. an older backend without WO-20).
@@ -270,19 +441,29 @@ function PlayerSelectionController() {
     }
   }
 
+  // Clear any pending tip-off fade-out timer on unmount.
+  useEffect(() => {
+    return () => {
+      if (tipOffTimer.current !== null) {
+        window.clearTimeout(tipOffTimer.current)
+      }
+    }
+  }, [])
+
   return (
     <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-screen-xl flex-col px-4 py-8 md:px-6">
-      <div className="mb-6 flex flex-col gap-4 border-b pb-6 duration-700 animate-in fade-in slide-in-from-bottom-4 [animation-fill-mode:both] md:flex-row md:items-end md:justify-between">
-        <div className="space-y-2">
-          <div className="font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
-            IsoLab
-          </div>
-          <h1 className="font-display text-4xl font-black uppercase tracking-tight">
-            Stage a 1v1 matchup
-          </h1>
-          <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
-            Pick two players from any era and simulate a one-on-one game to{" "}
-            <span className="font-mono tabular-nums text-foreground">21</span>.
+      <div className="mb-6 flex flex-col gap-4 pb-6 duration-700 animate-in fade-in slide-in-from-bottom-4 [animation-fill-mode:both] md:flex-row md:items-end md:justify-between">
+        <div>
+          <Kicker ruled>The ISO Lab</Kicker>
+          <h1 className="mt-2 display text-5xl sm:text-6xl">Stage a Matchup</h1>
+          <p className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 font-condensed text-[0.78rem] font-bold uppercase tracking-[0.14em] text-muted-foreground">
+            <span>Two players</span>
+            <span aria-hidden>·</span>
+            <span>Any two eras</span>
+            <span aria-hidden>·</span>
+            <span>
+              First to <span className="tabular-nums text-foreground">21</span>
+            </span>
           </p>
         </div>
         <div className="flex flex-col items-stretch gap-3 sm:items-end">
@@ -291,48 +472,25 @@ function PlayerSelectionController() {
             onChange={setPossessionMode}
             disabled={busy}
           />
-          <div className="flex flex-col items-stretch gap-2 sm:flex-row md:items-end">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                {/* Wrapped in a span so the tooltip still fires while the
-                    button is disabled (disabled controls emit no hover). */}
-                <span className="flex w-full sm:w-auto">
-                  <Button
-                    disabled={!canRunSimulation || busy}
-                    className="w-full font-mono uppercase tracking-wider sm:w-auto"
-                    onClick={runSimulation}
-                  >
-                    {simulationLoading ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Swords className="h-4 w-4" />
-                    )}
-                    {simulationResult ? "Re-run game" : "Run game"}
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              {!canRunSimulation && (
-                <TooltipContent>
-                  {runRequirementHint(playerA, playerB, seasonA, seasonB)}
-                </TooltipContent>
-              )}
-            </Tooltip>
-            <Button
-              variant="secondary"
-              disabled={!canRunSimulation || busy}
-              className="font-mono uppercase tracking-wider tabular-nums sm:w-auto"
-              onClick={runBulkSimulation}
-            >
-              {bulkLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Percent className="h-4 w-4" />
-              )}
-              {bulkLoading ? "Running 1,000…" : "Run 1,000 games"}
-            </Button>
-          </div>
+          <Button
+            variant="outline"
+            disabled={busy}
+            onClick={surpriseMe}
+            className="font-condensed font-bold uppercase tracking-[0.14em] sm:w-auto"
+          >
+            <Dices className="h-4 w-4" />
+            Random matchup
+          </Button>
         </div>
       </div>
+      <Rule weight="double" className="mb-6" />
+
+      {billing && (
+        <div className="mb-4 flex items-center justify-center gap-2 animate-in fade-in [animation-fill-mode:both]">
+          <Sparkles className="h-3.5 w-3.5 text-primary" />
+          <span className="kicker text-primary">{billing}</span>
+        </div>
+      )}
 
       <div className="grid flex-1 grid-cols-1 gap-4 lg:grid-cols-[1fr_auto_1fr] lg:items-start">
         <PlayerSlot
@@ -343,6 +501,9 @@ function PlayerSelectionController() {
           onClear={() => selectPlayerA(null)}
           onSeasonSelect={selectSeasonA}
           onSeasonStatsChange={setSeasonStatsA}
+          preload={preloadA}
+          onPreloadHandled={() => setPreloadA(null)}
+          compact={hasResults && !setupExpanded}
           confidenceTier={
             playerA
               ? simulationResult?.summary.player_stats[playerA.name]
@@ -350,11 +511,11 @@ function PlayerSelectionController() {
               : null
           }
         />
-        <div className="hidden h-full flex-col items-center justify-center gap-2 self-center lg:flex">
-          <span className="font-display text-4xl font-black italic leading-none text-muted-foreground/50">
-            VS
+        <div className="hidden h-full flex-col items-center justify-center gap-3 self-stretch lg:flex">
+          <span className="font-display text-5xl font-black italic leading-none text-foreground/70">
+            vs.
           </span>
-          <span className="h-8 w-px bg-border" />
+          <Rule vertical className="flex-1" />
         </div>
         <PlayerSlot
           label="Player B"
@@ -364,6 +525,9 @@ function PlayerSelectionController() {
           onClear={() => selectPlayerB(null)}
           onSeasonSelect={selectSeasonB}
           onSeasonStatsChange={setSeasonStatsB}
+          preload={preloadB}
+          onPreloadHandled={() => setPreloadB(null)}
+          compact={hasResults && !setupExpanded}
           confidenceTier={
             playerB
               ? simulationResult?.summary.player_stats[playerB.name]
@@ -373,12 +537,38 @@ function PlayerSelectionController() {
         />
       </div>
 
+      {/* Results mode: a one-line "edit matchup" affordance to re-expand the
+          collapsed setup detail (vitals + stat bars + the comparison panel), so
+          you don't scroll past full input panels to read the verdict. */}
+      {hasResults && (
+        <div className="mt-3 flex justify-center">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setSetupExpanded((open) => !open)}
+            className="font-condensed text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground"
+            aria-expanded={setupExpanded}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            {setupExpanded ? "Hide matchup detail" : "Edit matchup"}
+            <ChevronDown
+              className={cn(
+                "h-3.5 w-3.5 transition-transform",
+                setupExpanded && "rotate-180"
+              )}
+            />
+          </Button>
+        </div>
+      )}
+
       {/* Tendency Explorer comparison panel: appears automatically once both
           players and seasons are confirmed and their season stats have loaded,
           below the player cards and ahead of the simulation results. The
           season_id guard avoids rendering against a previous season's stats
-          while a newly selected season is still loading. */}
-      {playerA &&
+          while a newly selected season is still loading. In results mode it's
+          collapsed behind the "Edit matchup" toggle above. */}
+      {(!hasResults || setupExpanded) &&
+        playerA &&
         playerB &&
         seasonA &&
         seasonB &&
@@ -425,7 +615,8 @@ function PlayerSelectionController() {
       )}
 
       {simulationResult && playerA && playerB && (
-        <div className="mt-6 grid gap-4 xl:grid-cols-[24rem_1fr]">
+        <div className="mt-6 space-y-4">
+          {/* The single-game box score (secondary to the 1,000-sim verdict). */}
           <MatchSummaryView
             summary={simulationResult.summary}
             playerAName={playerA.name}
@@ -433,10 +624,196 @@ function PlayerSelectionController() {
             onRerun={runSimulation}
             rerunDisabled={busy}
           />
-          <PlayByPlayView playByPlay={simulationResult.play_by_play} />
+
+          {/* The Running Diary is the heaviest region — collapsed by default
+              behind a toggle, with the lead-margin summary still in reach via
+              the button copy. The exported PlayByPlayView is unchanged. */}
+          <div>
+            <Button
+              variant="outline"
+              onClick={() => setPlayByPlayOpen((open) => !open)}
+              aria-expanded={playByPlayOpen}
+              className="w-full justify-center font-condensed text-sm font-bold uppercase tracking-[0.14em] tabular-nums"
+            >
+              <ListOrdered className="h-4 w-4" />
+              {playByPlayOpen
+                ? "Hide play-by-play"
+                : `Show play-by-play (${simulationResult.play_by_play.length} possessions)`}
+              <ChevronDown
+                className={cn(
+                  "h-4 w-4 transition-transform",
+                  playByPlayOpen && "rotate-180"
+                )}
+              />
+            </Button>
+            {playByPlayOpen && (
+              <div className="mt-4 animate-in fade-in slide-in-from-bottom-2 [animation-fill-mode:both]">
+                <PlayByPlayView playByPlay={simulationResult.play_by_play} />
+              </div>
+            )}
+          </div>
         </div>
       )}
+
+      <RunActionBar
+        canRun={canRunSimulation}
+        busy={busy}
+        simulationLoading={simulationLoading}
+        bulkLoading={bulkLoading}
+        hasResult={Boolean(simulationResult)}
+        readyHint={readyHint}
+        onRun={runSimulation}
+        onRunBulk={runBulkSimulation}
+      />
+
+      <TipOffOverlay show={tipOffShow} data={tipOffData} />
     </div>
+  )
+}
+
+// A sticky bottom action bar that keeps the primary Run control reachable on
+// any scroll position. The ready/not-ready state is spelled out so the disabled
+// state is never a mystery (it mirrors the Enter-to-run guard).
+function RunActionBar({
+  canRun,
+  busy,
+  simulationLoading,
+  bulkLoading,
+  hasResult,
+  readyHint,
+  onRun,
+  onRunBulk,
+}: {
+  canRun: boolean
+  busy: boolean
+  simulationLoading: boolean
+  bulkLoading: boolean
+  hasResult: boolean
+  readyHint: string
+  onRun: () => void
+  onRunBulk: () => void
+}) {
+  return (
+    <div className="sticky bottom-0 z-30 -mx-4 mt-6 border-t border-border bg-background/85 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/70 md:-mx-6 md:px-6">
+      <div className="mx-auto flex w-full max-w-screen-xl flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-2">
+          <span
+            className={cn(
+              "size-2 shrink-0 rounded-full",
+              canRun ? "bg-court" : "bg-muted-foreground/40"
+            )}
+            aria-hidden
+          />
+          <span
+            className={cn(
+              "truncate kicker",
+              canRun ? "text-foreground" : "text-muted-foreground"
+            )}
+          >
+            {canRun ? "Ready — first to 21" : readyHint}
+          </span>
+        </div>
+        <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+          <Button
+            variant="secondary"
+            disabled={!canRun || busy}
+            className="w-full font-condensed font-bold uppercase tracking-[0.14em] tabular-nums sm:w-auto"
+            onClick={onRunBulk}
+          >
+            {bulkLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Percent className="h-4 w-4" />
+            )}
+            {bulkLoading ? "Tallying 1,000…" : "Simulate 1,000"}
+          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              {/* Wrapped in a span so the tooltip still fires while the button
+                  is disabled (disabled controls emit no hover). */}
+              <span className="flex w-full sm:w-auto">
+                <Button
+                  disabled={!canRun || busy}
+                  className="w-full font-condensed font-bold uppercase tracking-[0.14em] sm:w-auto"
+                  onClick={onRun}
+                >
+                  {simulationLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Swords className="h-4 w-4" />
+                  )}
+                  {hasResult ? "Run it back" : "Run game"}
+                </Button>
+              </span>
+            </TooltipTrigger>
+            {!canRun && <TooltipContent>{readyHint}</TooltipContent>}
+          </Tooltip>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// The "tip-off" beat: a dramatic full-bleed flash framing the two names as a
+// verdict is computed. It lingers ~1s (the controller toggles `show` off after
+// that) and fades smoothly in and out via an opacity transition, so it stays
+// readable. Always non-blocking (pointer-events-none) so the sim runs beneath.
+// Only ever rendered with `show` toggling for the first run of a matchup;
+// reduced-motion users never see it (the controller skips the beat entirely).
+function TipOffOverlay({
+  show,
+  data,
+}: {
+  show: boolean
+  data: { a: string; b: string; tag?: string } | null
+}) {
+  return (
+    <div
+      className={cn(
+        "pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm transition-opacity duration-500 ease-in-out",
+        show ? "opacity-100" : "opacity-0"
+      )}
+      aria-hidden
+    >
+      <div
+        className={cn(
+          "flex flex-col items-center gap-3 transition-all duration-500 ease-out",
+          show ? "scale-100 opacity-100" : "scale-95 opacity-0"
+        )}
+      >
+        {/* Editorial billing (the rivalry nickname) — fades in a beat after the
+            names land, in vermillion, like a fight-card subtitle. */}
+        {data?.tag && (
+          <span
+            className={cn(
+              "font-display text-base font-bold italic tracking-tight text-primary transition-all duration-700 ease-out [transition-delay:400ms] sm:text-xl",
+              show ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0"
+            )}
+          >
+            {data.tag}
+          </span>
+        )}
+        <div className="flex items-center gap-4">
+          <span className="display text-3xl sm:text-5xl">
+            {lastNameOf(data?.a ?? "")}
+          </span>
+          <span className="font-display text-2xl font-black italic text-primary sm:text-3xl">
+            vs.
+          </span>
+          <span className="display text-3xl sm:text-5xl">
+            {lastNameOf(data?.b ?? "")}
+          </span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Respect the user's reduced-motion preference for the tip-off beat.
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true
   )
 }
 
@@ -449,6 +826,9 @@ function PlayerSlot({
   onSeasonSelect,
   onSeasonStatsChange,
   confidenceTier,
+  preload,
+  onPreloadHandled,
+  compact = false,
 }: PlayerSlotProps) {
   const {
     seasons,
@@ -468,6 +848,9 @@ function PlayerSlot({
   // Name of the quick-pick currently being resolved, so its chip can show a
   // spinner (the rest are disabled while one is in flight).
   const [resolvingPick, setResolvingPick] = useState<string | null>(null)
+  // Name being resolved from a controller preload (deep-link / Surprise me), so
+  // the empty card can show a clear "loading" state instead of a cold start.
+  const [preloadingName, setPreloadingName] = useState<string | null>(null)
   const quickPicks = label === "Player A" ? QUICK_PICKS_A : QUICK_PICKS_B
 
   const profile = selectedPlayer
@@ -486,17 +869,23 @@ function PlayerSlot({
   }, [seasonStats, onSeasonStatsChange])
 
   // Confirm a player picked from the combobox: load the player's seasons, then
-  // default the selection to the most recent one (the list is returned
-  // newest-first) so the matchup is runnable immediately. The user can still
-  // pick a different season from the dropdown.
-  async function confirmPlayer(result: PlayerProfile) {
+  // default the selection. A `seasonOverride` (e.g. a peak season from a deep-
+  // link / sample bout) wins when that season exists for the player; otherwise
+  // we fall back to the most recent one (the list is newest-first) so the
+  // matchup is always runnable. The user can still change it from the dropdown.
+  async function confirmPlayer(result: PlayerProfile, seasonOverride?: string) {
     onSelect(result)
     clearSeasonStats()
     const loadedSeasons = await loadSeasons(result.player_id)
-    const mostRecentSeason = loadedSeasons?.[0]?.season_id ?? null
-    onSeasonSelect(mostRecentSeason)
-    if (mostRecentSeason) {
-      loadSeasonStats(result.player_id, mostRecentSeason)
+    const hasOverride =
+      !!seasonOverride &&
+      !!loadedSeasons?.some((s) => s.season_id === seasonOverride)
+    const season = hasOverride
+      ? seasonOverride!
+      : loadedSeasons?.[0]?.season_id ?? null
+    onSeasonSelect(season)
+    if (season) {
+      loadSeasonStats(result.player_id, season)
     }
   }
 
@@ -513,6 +902,35 @@ function PlayerSlot({
       setResolvingPick(null)
     }
   }
+
+  // Resolve a controller preload request through the same path as a quick-pick.
+  // The token guards against re-resolving the same request across re-renders.
+  const handledTokenRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (!preload || preload.token === handledTokenRef.current) return
+    handledTokenRef.current = preload.token
+    let cancelled = false
+    setPreloadingName(preload.name)
+    ;(async () => {
+      try {
+        const result = await searchPlayer(preload.name)
+        if (!cancelled && result) {
+          await confirmPlayer(result, preload.season)
+        }
+      } finally {
+        if (!cancelled) {
+          setPreloadingName(null)
+          onPreloadHandled?.()
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // confirmPlayer / searchPlayer are stable for this purpose; re-run only when
+    // a new preload token arrives.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preload])
 
   function handleClear() {
     clearSeasons()
@@ -535,18 +953,30 @@ function PlayerSlot({
 
   return (
     <div
-      className="flex min-h-[32rem] flex-col overflow-hidden rounded-2xl border bg-card shadow-sm"
-      style={
-        seasonTeamColor
-          ? {
-              backgroundImage: `linear-gradient(to bottom right, ${withAlpha(
-                seasonTeamColor,
-                0.16
-              )}, transparent 60%)`,
-            }
-          : undefined
-      }
+      className={cn(
+        "relative isolate flex flex-col overflow-hidden rounded-sm border bg-card",
+        // Empty drop-zone gets a floor so it has presence; a filled card sizes
+        // to its content (no dead space below the stat bars).
+        !profile && !preloadingName && "min-h-[29rem]"
+      )}
     >
+      {/* A fine printed halftone tone in the player's team color, bleeding from
+          the top-right — the same dot treatment as the homepage cover. */}
+      {seasonTeamColor && (
+        <div
+          aria-hidden
+          className="halftone-splash pointer-events-none absolute inset-0 -z-10"
+          style={
+            {
+              "--splash-dot": withAlpha(seasonTeamColor, 0.2),
+              backgroundImage:
+                "radial-gradient(var(--splash-dot) 1.4px, transparent 1.9px)",
+              backgroundSize: "9px 9px",
+            } as CSSProperties
+          }
+        />
+      )}
+
       {/* A thin bar of the season team's color tops the card. */}
       {seasonTeamColor && (
         <div className="h-1 w-full" style={{ backgroundColor: seasonTeamColor }} />
@@ -555,15 +985,16 @@ function PlayerSlot({
       {/* Slot label, with Clear anchored to the card's top-right once a player
           is selected. */}
       <div className="flex items-center justify-between gap-2 border-b px-4 py-2.5">
-        <span className="flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
-          <UserRound className="h-4 w-4" />
-          {label}
+        <span className="flex items-center gap-2">
+          <Kicker tone="muted">
+            {label === "Player A" ? "Corner A" : "Corner B"}
+          </Kicker>
         </span>
         {profile && (
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 px-2 font-mono text-xs uppercase tracking-wider text-muted-foreground"
+            className="h-7 bg-background/80 px-2.5 font-condensed text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground ring-1 ring-border backdrop-blur-sm hover:bg-muted hover:text-foreground"
             onClick={handleClear}
             aria-label="Clear player"
           >
@@ -577,26 +1008,40 @@ function PlayerSlot({
           {/* Identity: photo, name, confidence, and the season tag pinned
               top-right in line with the name. The team badge carries its logo. */}
           <div className="flex items-start gap-3 p-4">
-            <PlayerAvatar playerId={profile.player_id} name={profile.name} />
+            <PlayerAvatar
+              playerId={profile.player_id}
+              name={profile.name}
+              accent={seasonTeamColor}
+            />
             <div className="min-w-0 flex-1 space-y-1.5">
               {/* Top row: name (left) + SEASON label (right) */}
               <div className="flex items-center justify-between gap-2">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <h2 className="font-display text-2xl font-bold uppercase leading-none tracking-tight">
+                  <h2 className="display text-2xl leading-none">
                     {profile.name}
                   </h2>
                   {confidenceTier && <ConfidenceBadge tier={confidenceTier} />}
+                  {profile.data_warnings.length > 0 && (
+                    <DataWarningInfo warnings={profile.data_warnings} />
+                  )}
                 </div>
-                <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                <Kicker tone="muted" className="shrink-0">
                   Season
-                </span>
+                </Kicker>
               </div>
               {/* Bottom row: position/team badges (left) + selector (right) */}
               <div className="flex items-center justify-between gap-2">
-                <div className="flex flex-wrap gap-1.5">
-                  {profile.position && <Badge>{profile.position}</Badge>}
+                {/* Position + team as flat, translucent metadata tags — the
+                    same tile treatment as the vitals/season chips, so they sit
+                    cleanly under the name and stay legible over the dots. */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {profile.position && (
+                    <span className="inline-flex items-center rounded-sm bg-background/80 px-2 py-0.5 font-condensed text-[0.7rem] font-bold uppercase tracking-[0.1em] text-muted-foreground ring-1 ring-border backdrop-blur-sm">
+                      {profile.position}
+                    </span>
+                  )}
                   {(seasonTeam ?? profile.team) && (
-                    <Badge variant="secondary" className="gap-1.5 pl-1.5">
+                    <span className="inline-flex items-center gap-1.5 rounded-sm bg-background/80 px-2 py-0.5 font-condensed text-[0.7rem] font-bold uppercase tracking-[0.1em] text-foreground ring-1 ring-border backdrop-blur-sm">
                       {seasonTeamLogo && (
                         <img
                           src={seasonTeamLogo}
@@ -608,7 +1053,7 @@ function PlayerSlot({
                         />
                       )}
                       {seasonTeam ?? profile.team}
-                    </Badge>
+                    </span>
                   )}
                 </div>
                 <SeasonSelector
@@ -625,41 +1070,49 @@ function PlayerSlot({
             </div>
           </div>
 
-          {/* Vitals — translucent tiles, labelled in words */}
-          <div className="grid grid-cols-3 gap-2 px-4 pb-3">
-            <VitalTile
-              icon={Ruler}
-              label="Height"
-              value={profile.height ?? "N/A"}
-            />
-            <VitalTile
-              icon={Weight}
-              label="Weight"
-              value={formatWeight(profile.weight)}
-            />
-            <VitalTile
-              icon={MoveHorizontal}
-              label="Wingspan"
-              value={formatWingspan(profile.wingspan)}
-            />
-          </div>
+          {/* Vitals + season averages — the heavy body, hidden in compact
+              (results) mode so only the identity header + season stay visible. */}
+          {!compact && (
+            <>
+              {/* Vitals — translucent tiles, labelled in words */}
+              <div className="grid grid-cols-3 gap-2 px-4 pb-3">
+                <VitalTile
+                  icon={Ruler}
+                  label="Height"
+                  value={profile.height ?? "N/A"}
+                />
+                <VitalTile
+                  icon={Weight}
+                  label="Weight"
+                  value={formatWeight(profile.weight)}
+                />
+                <VitalTile
+                  icon={MoveHorizontal}
+                  label="Wingspan"
+                  value={formatWingspan(profile.wingspan)}
+                />
+              </div>
 
-          {/* Season averages */}
-          <div className="px-4 pb-4">
-            <SeasonStatsBody
-              selectedSeason={selectedSeason}
-              stats={seasonStats}
-              loading={seasonStatsLoading}
-              error={seasonStatsError}
-              teamColor={seasonTeamColor}
-            />
-          </div>
-
-          {profile.data_warnings.length > 0 && (
-            <div className="px-4 pb-4">
-              <WarningAlert warnings={profile.data_warnings} />
-            </div>
+              {/* Season averages */}
+              <div className="px-4 pb-4">
+                <SeasonStatsBody
+                  selectedSeason={selectedSeason}
+                  stats={seasonStats}
+                  loading={seasonStatsLoading}
+                  error={seasonStatsError}
+                  teamColor={seasonTeamColor}
+                />
+              </div>
+            </>
           )}
+        </div>
+      ) : preloadingName ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-4 text-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <div className="space-y-1">
+            <Kicker tone="muted">Stepping on the court</Kicker>
+            <p className="display text-xl leading-none">{preloadingName}</p>
+          </div>
         </div>
       ) : (
         <div className="flex flex-1 flex-col gap-3 p-4">
@@ -673,7 +1126,7 @@ function PlayerSlot({
               <button
                 type="button"
                 aria-label={`Select ${label}`}
-                className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed font-mono text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:border-solid hover:border-amber-500/40 hover:bg-muted/50"
+                className="flex flex-1 flex-col items-center justify-center gap-2 rounded-sm border border-dashed font-condensed text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground transition-colors hover:border-solid hover:border-primary/40 hover:bg-muted/50"
               >
                 <UserRound className="h-8 w-8 opacity-40" />
                 Select {label}
@@ -683,10 +1136,10 @@ function PlayerSlot({
           {/* Bottom half: one-click recommendations as a grid of headshot
               tiles — same confirm flow as a typed pick, just pre-named. */}
           <div className="flex flex-1 flex-col gap-2.5">
-            <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+            <Kicker tone="muted" className="flex items-center gap-1.5">
               <Sparkles className="h-3 w-3" />
-              Quick picks
-            </span>
+              Quick Picks
+            </Kicker>
             <div className="grid flex-1 grid-cols-3 content-start gap-2">
               {quickPicks.map((pick) => (
                 <QuickPickTile
@@ -724,26 +1177,22 @@ function QuickPickTile({
       disabled={disabled}
       onClick={onSelect}
       aria-label={`Quick pick ${pick.name}`}
-      className="flex flex-col items-center gap-1.5 rounded-xl bg-background/70 p-2 text-center shadow-sm ring-1 ring-border transition-all hover:-translate-y-0.5 hover:bg-muted/50 hover:ring-amber-500/40 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:bg-background/70 disabled:hover:ring-border"
+      className="group/qp flex flex-col items-center gap-1.5 rounded-sm bg-background/70 p-2 text-center ring-1 ring-border transition-all hover:-translate-y-0.5 hover:bg-muted/50 hover:ring-primary disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:bg-background/70 disabled:hover:ring-border"
     >
       <div className="relative">
-        <Avatar className="h-11 w-11 rounded-lg border bg-muted">
-          <AvatarImage
-            src={`https://cdn.nba.com/headshots/nba/latest/1040x760/${pick.id}.png`}
-            alt={pick.name}
-            className="object-cover object-top"
-          />
-          <AvatarFallback className="rounded-lg text-xs font-medium">
-            {getInitials(pick.name)}
-          </AvatarFallback>
-        </Avatar>
+        <HalftoneAvatar
+          src={`https://cdn.nba.com/headshots/nba/latest/1040x760/${pick.id}.png`}
+          alt={pick.name}
+          fallback={getInitials(pick.name)}
+          size={44}
+        />
         {resolving && (
-          <span className="absolute inset-0 flex items-center justify-center rounded-lg bg-background/70">
+          <span className="absolute inset-0 flex items-center justify-center rounded-sm bg-background/70">
             <Loader2 className="h-4 w-4 animate-spin" />
           </span>
         )}
       </div>
-      <span className="line-clamp-2 font-display text-xs font-medium uppercase leading-tight tracking-tight">
+      <span className="line-clamp-2 font-display text-xs font-bold leading-tight">
         {pick.name}
       </span>
     </button>
@@ -773,7 +1222,7 @@ function SeasonSelector({
     >
       <SelectTrigger
         aria-label={`Select season for ${label}`}
-        className="h-auto w-fit gap-1.5 rounded-full border-0 bg-background/70 px-3 py-1 font-mono text-xs uppercase tracking-wider tabular-nums shadow-sm ring-1 ring-border focus-visible:ring-2"
+        className="h-auto w-fit gap-1.5 rounded-sm border-0 bg-background/70 px-3 py-1 font-condensed text-xs font-bold uppercase tracking-[0.14em] tabular-nums ring-1 ring-border focus-visible:ring-2"
       >
         <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
         <SelectValue
@@ -858,7 +1307,7 @@ function SeasonStatsBody({
   ]
 
   return (
-    <div className="space-y-3.5 rounded-lg bg-background/60 p-4 shadow-sm ring-1 ring-border">
+    <div className="space-y-3.5 rounded-sm bg-background/60 p-4 ring-1 ring-border">
       {bars.map((bar) => (
         <StatBar
           key={bar.label}
@@ -887,19 +1336,19 @@ function StatBar({
   const fraction = Math.max(0.03, Math.min(1, value / max))
   return (
     <div className="flex items-center gap-3">
-      <span className="w-8 shrink-0 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+      <span className="w-8 shrink-0 kicker text-muted-foreground">
         {label}
       </span>
-      <div className="h-3 flex-1 overflow-hidden rounded-full bg-foreground/10">
+      <div className="h-3 flex-1 overflow-hidden rounded-[1px] bg-foreground/10">
         <div
-          className="h-full rounded-full transition-[width] duration-500"
+          className="h-full rounded-[1px] transition-[width] duration-500"
           style={{
             width: `${fraction * 100}%`,
             backgroundColor: color ? withAlpha(color, 0.85) : "var(--primary)",
           }}
         />
       </div>
-      <span className="w-9 shrink-0 text-right font-mono text-sm font-medium tabular-nums">
+      <span className="w-9 shrink-0 text-right font-display text-sm font-bold tabular-nums">
         {value.toFixed(1)}
       </span>
     </div>
@@ -917,12 +1366,12 @@ function VitalTile({
   value: string
 }) {
   return (
-    <div className="rounded-lg bg-background/70 px-3 py-2.5 shadow-sm ring-1 ring-border">
-      <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-        <Icon className="h-3 w-3" />
+    <div className="rounded-sm bg-background/70 px-3 py-2.5 ring-1 ring-border">
+      <div className="flex items-center gap-1.5 kicker text-muted-foreground">
+        <Icon className="h-3.5 w-3.5" />
         {label}
       </div>
-      <div className="mt-0.5 font-mono text-sm font-medium tabular-nums">
+      <div className="mt-0.5 font-display text-base font-bold tabular-nums">
         {value}
       </div>
     </div>
@@ -932,11 +1381,11 @@ function VitalTile({
 // Shared translucent stat tile, matching the shot-map chip treatment.
 function StatTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg bg-background/70 px-2 py-2.5 text-center shadow-sm ring-1 ring-border">
-      <div className="font-display text-2xl font-bold tabular-nums leading-none">
+    <div className="rounded-sm bg-background/70 px-2 py-2.5 text-center ring-1 ring-border">
+      <div className="stat-figure text-2xl leading-none">
         {value}
       </div>
-      <div className="mt-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+      <div className="mt-1 kicker text-muted-foreground">
         {label}
       </div>
     </div>
@@ -946,23 +1395,24 @@ function StatTile({ label, value }: { label: string; value: string }) {
 function PlayerAvatar({
   playerId,
   name,
+  accent,
   className,
 }: {
   playerId: number
   name: string
+  accent?: string | null
   className?: string
 }) {
   return (
-    <Avatar className={cn("h-14 w-14 shrink-0 rounded-lg border bg-muted", className)}>
-      <AvatarImage
-        src={`https://cdn.nba.com/headshots/nba/latest/1040x760/${playerId}.png`}
-        alt={name}
-        className="object-cover object-top"
-      />
-      <AvatarFallback className="rounded-lg text-sm font-medium">
-        {getInitials(name)}
-      </AvatarFallback>
-    </Avatar>
+    <HalftoneAvatar
+      src={`https://cdn.nba.com/headshots/nba/latest/1040x760/${playerId}.png`}
+      alt={name}
+      fallback={getInitials(name)}
+      size={56}
+      active
+      accent={accent ?? undefined}
+      className={cn("shrink-0", className)}
+    />
   )
 }
 
@@ -970,11 +1420,9 @@ type PillTone = "brand" | "success" | "warning" | "danger" | "neutral"
 
 const PILL_TONES: Record<PillTone, string> = {
   brand: "border-primary/20 bg-primary/10 text-primary",
-  success:
-    "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  warning:
-    "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  danger: "border-red-500/20 bg-red-500/10 text-red-700 dark:text-red-400",
+  success: "border-primary/20 bg-primary/10 text-primary",
+  warning: "border-primary/20 bg-primary/10 text-primary",
+  danger: "border-border bg-muted text-muted-foreground",
   neutral: "border-border bg-muted text-muted-foreground",
 }
 
@@ -993,7 +1441,7 @@ function Pill({
     <Badge
       variant="outline"
       className={cn(
-        "gap-1.5 font-mono text-[0.65rem] uppercase tracking-wider",
+        "gap-1.5 kicker",
         PILL_TONES[tone],
         className
       )}
@@ -1004,6 +1452,12 @@ function Pill({
   )
 }
 
+const CONFIDENCE_LABELS: Record<ConfidenceTier, string> = {
+  HIGH: "Verified",
+  MEDIUM: "On Record",
+  LOW: "Estimated",
+}
+
 function ConfidenceBadge({ tier }: { tier: ConfidenceTier }) {
   const tone: PillTone =
     tier === "HIGH" ? "success" : tier === "MEDIUM" ? "warning" : "danger"
@@ -1012,7 +1466,7 @@ function ConfidenceBadge({ tier }: { tier: ConfidenceTier }) {
       <TooltipTrigger asChild>
         <span tabIndex={0} className="cursor-default">
           <Pill tone={tone} dot>
-            {titleCase(tier)} confidence
+            {CONFIDENCE_LABELS[tier]}
           </Pill>
         </span>
       </TooltipTrigger>
@@ -1034,38 +1488,39 @@ function PossessionModeToggle({
 }) {
   return (
     <div className="flex flex-col gap-1.5 sm:items-end">
-      <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-        Possession mode
-      </span>
+      <Kicker tone="muted">Possession</Kicker>
       <div
         role="radiogroup"
         aria-label="Possession mode"
-        className="inline-flex rounded-lg border bg-muted/40 p-0.5"
+        className="inline-flex rounded-sm border bg-muted/40 p-0.5"
       >
         {POSSESSION_MODES.map((mode) => {
           const Icon = mode.icon
           const active = value === mode.value
           return (
-            <button
-              key={mode.value}
-              type="button"
-              role="radio"
-              aria-checked={active}
-              aria-label={`${mode.label} — ${mode.hint}`}
-              title={mode.hint}
-              disabled={disabled}
-              onClick={() => onChange(mode.value)}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 font-mono text-xs uppercase tracking-wider transition-colors",
-                "disabled:cursor-not-allowed disabled:opacity-50",
-                active
-                  ? "bg-background text-amber-600 shadow-sm dark:text-amber-400"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {mode.label}
-            </button>
+            <Tooltip key={mode.value}>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  aria-label={`${mode.label} — ${mode.hint}`}
+                  disabled={disabled}
+                  onClick={() => onChange(mode.value)}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-sm px-4 py-1.5 font-condensed text-xs font-bold uppercase tracking-[0.14em] transition-colors",
+                    "disabled:cursor-not-allowed disabled:opacity-50",
+                    active
+                      ? "bg-background text-primary shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {mode.label}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">{mode.hint}</TooltipContent>
+            </Tooltip>
           )
         })}
       </div>
@@ -1083,26 +1538,32 @@ function WinProbabilityCard({
   result: BulkSimulationResult
 }) {
   const aWins = result.player_a_win_pct >= result.player_b_win_pct
+  const favoriteName = aWins ? playerA.name : playerB.name
+  const favoritePct = aWins
+    ? result.player_a_win_pct
+    : result.player_b_win_pct
+  const verdict = verdictHeadline(favoriteName, favoritePct)
   return (
-    <Card className="mt-6 rounded-2xl">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
-          <Percent className="h-4 w-4" />
-          Win probability ·{" "}
-          <span className="tabular-nums">
-            {result.total_simulations.toLocaleString()}
-          </span>{" "}
-          simulations
-        </CardTitle>
+    <Card className="mt-6 rounded-sm border-2 border-primary/30 shadow-sm ring-1 ring-primary/10">
+      <CardHeader className="space-y-1.5">
+        <Kicker ruled>
+          The Verdict — {result.total_simulations.toLocaleString()} Simulations
+        </Kicker>
       </CardHeader>
-      <CardContent className="space-y-2">
-        <div className="flex items-center justify-between font-mono text-[0.6rem] uppercase tracking-wider">
+      <CardContent className="space-y-3">
+        {/* Verdict headline on a faint halftone field — the dominant headline of
+            the results; the single-game Game Story below is secondary. */}
+        <div className="relative flex items-center justify-center overflow-hidden rounded-sm border px-4 py-8 sm:py-10">
+          <span className="halftone pointer-events-none absolute inset-0 opacity-50" aria-hidden />
+          <h3 className="relative display text-center text-4xl sm:text-5xl">
+            {verdict}
+          </h3>
+        </div>
+        <div className="flex items-center justify-between kicker">
           <span
             className={cn(
               "truncate",
-              aWins
-                ? "text-amber-600 dark:text-amber-400"
-                : "text-muted-foreground"
+              aWins ? "text-primary" : "text-muted-foreground"
             )}
           >
             {playerA.name}
@@ -1113,47 +1574,33 @@ function WinProbabilityCard({
           <span
             className={cn(
               "truncate text-right",
-              !aWins
-                ? "text-amber-600 dark:text-amber-400"
-                : "text-muted-foreground"
+              !aWins ? "text-primary" : "text-muted-foreground"
             )}
           >
             {playerB.name}
           </span>
         </div>
-        <div className="flex h-3 overflow-hidden rounded-full bg-muted">
+        <div className="flex h-3 overflow-hidden rounded-[1px] bg-muted">
           <div
-            className={cn("h-full", aWins ? "bg-amber-500" : "bg-foreground/35")}
+            className={cn("h-full", aWins ? "bg-primary" : "bg-foreground/35")}
             style={{ width: `${result.player_a_win_pct}%` }}
           />
           {!aWins && (
             <div
-              className="h-full bg-amber-500"
+              className="h-full bg-primary"
               style={{ width: `${result.player_b_win_pct}%` }}
             />
           )}
         </div>
-        <div className="flex items-center justify-between font-display text-3xl font-black tabular-nums">
-          <span
-            className={
-              aWins
-                ? "text-amber-600 dark:text-amber-400"
-                : "text-muted-foreground"
-            }
-          >
+        <div className="flex items-center justify-between stat-figure text-4xl sm:text-5xl">
+          <span className={aWins ? "text-primary" : "text-muted-foreground"}>
             {Math.round(result.player_a_win_pct)}%
           </span>
-          <span
-            className={
-              !aWins
-                ? "text-amber-600 dark:text-amber-400"
-                : "text-muted-foreground"
-            }
-          >
+          <span className={!aWins ? "text-primary" : "text-muted-foreground"}>
             {Math.round(result.player_b_win_pct)}%
           </span>
         </div>
-        <p className="pt-1 font-mono text-[0.65rem] uppercase tracking-wider text-muted-foreground">
+        <p className="pt-1 kicker text-muted-foreground">
           {playerA.name} won{" "}
           <span className="tabular-nums text-foreground">
             {result.player_a_wins.toLocaleString()}
@@ -1178,19 +1625,41 @@ function WinProbabilityCard({
   )
 }
 
-function WarningAlert({ warnings }: { warnings: string[] }) {
+// Compact, non-disruptive surfacing of data limitations: a small red info "i"
+// that reveals the warning text(s) on hover/focus, replacing the old full-width
+// alert box. Keyboard-focusable for accessibility.
+function DataWarningInfo({
+  warnings,
+  className,
+}: {
+  warnings: string[]
+  className?: string
+}) {
   return (
-    <Alert className="border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300 [&>svg]:text-amber-600 dark:[&>svg]:text-amber-400">
-      <AlertTriangle className="h-4 w-4" />
-      <AlertTitle>Data limitations</AlertTitle>
-      <AlertDescription className="text-amber-700/90 dark:text-amber-300/90">
-        <ul className="list-disc space-y-1 pl-4">
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          tabIndex={0}
+          aria-label="Data limitations"
+          className={cn(
+            "inline-flex cursor-default text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40 rounded-sm",
+            className
+          )}
+        >
+          <Info className="h-4 w-4" />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs">
+        <span className="block font-condensed text-xs font-bold uppercase tracking-[0.14em]">
+          Data limitations
+        </span>
+        <ul className="mt-1 list-disc space-y-1 pl-4">
           {warnings.map((warning) => (
             <li key={warning}>{warning}</li>
           ))}
         </ul>
-      </AlertDescription>
-    </Alert>
+      </TooltipContent>
+    </Tooltip>
   )
 }
 
@@ -1212,33 +1681,33 @@ export function MatchSummaryView({
 }) {
   const aWon = summary.final_score.a >= summary.final_score.b
   return (
-    <Card className="rounded-2xl">
+    <Card className="rounded-sm">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
-          <Trophy className="h-4 w-4" />
-          Match summary
-        </CardTitle>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Kicker ruled>The Game Story</Kicker>
+            {summary.data_warnings.length > 0 && (
+              <DataWarningInfo warnings={summary.data_warnings} />
+            )}
+          </div>
+          <Kicker tone="muted">Final</Kicker>
+        </div>
       </CardHeader>
       <CardContent className="space-y-5">
-        <div className="space-y-2">
-          <div className="text-center font-mono text-[0.6rem] uppercase tracking-[0.2em] text-muted-foreground">
-            Final
-          </div>
-          <div className="divide-y overflow-hidden rounded-lg border">
-            <ScoreRow
-              name={playerAName}
-              score={summary.final_score.a}
-              winner={aWon}
-            />
-            <ScoreRow
-              name={playerBName}
-              score={summary.final_score.b}
-              winner={!aWon}
-            />
-          </div>
+        <div className="divide-y overflow-hidden rounded-sm border">
+          <ScoreRow
+            name={playerAName}
+            score={summary.final_score.a}
+            winner={aWon}
+          />
+          <ScoreRow
+            name={playerBName}
+            score={summary.final_score.b}
+            winner={!aWon}
+          />
         </div>
 
-        <div className="space-y-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {Object.entries(summary.player_stats).map(([playerName, stats]) => (
             <PlayerStatsSummary
               key={playerName}
@@ -1248,14 +1717,10 @@ export function MatchSummaryView({
           ))}
         </div>
 
-        {summary.data_warnings.length > 0 && (
-          <WarningAlert warnings={summary.data_warnings} />
-        )}
-
         {onRerun && (
           <Button
             variant="outline"
-            className="w-full font-mono uppercase tracking-wider"
+            className="w-full font-condensed font-bold uppercase tracking-[0.14em]"
             onClick={onRerun}
             disabled={rerunDisabled}
           >
@@ -1264,7 +1729,7 @@ export function MatchSummaryView({
             ) : (
               <RotateCcw className="h-4 w-4" />
             )}
-            Re-run
+            Run it back
           </Button>
         )}
       </CardContent>
@@ -1285,29 +1750,28 @@ function ScoreRow({
     <div
       className={cn(
         "flex items-center justify-between gap-3 px-4 py-3",
-        winner ? "bg-amber-500/5" : "bg-muted/20"
+        winner ? "bg-primary/5" : "bg-muted/20"
       )}
     >
       <div className="flex min-w-0 items-center gap-2">
         <span
           className={cn(
-            "truncate font-display text-lg font-bold uppercase leading-none tracking-tight",
-            winner && "text-amber-600 dark:text-amber-400"
+            "truncate display text-lg leading-none",
+            winner && "text-primary"
           )}
         >
           {name}
         </span>
         {winner && (
-          <Pill tone="warning">
-            <Trophy className="h-3 w-3" />
+          <Badge className="kicker">
             Winner
-          </Pill>
+          </Badge>
         )}
       </div>
       <span
         className={cn(
-          "font-display text-3xl font-black tabular-nums",
-          winner ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
+          "stat-figure text-3xl",
+          winner ? "text-primary" : "text-muted-foreground"
         )}
       >
         {score}
@@ -1324,8 +1788,8 @@ function PlayerStatsSummary({
   stats: PlayerSimStats
 }) {
   return (
-    <div className="space-y-4 rounded-lg border p-4">
-      <div className="font-display text-lg font-bold uppercase leading-none tracking-tight">
+    <div className="space-y-4 rounded-sm border p-4">
+      <div className="display text-lg leading-none">
         {playerName}
       </div>
 
@@ -1342,7 +1806,7 @@ function PlayerStatsSummary({
         }
       />
 
-      <div className="flex items-center gap-4 border-t pt-3 font-mono text-[0.65rem] uppercase tracking-wider text-muted-foreground">
+      <div className="flex items-center gap-4 border-t pt-3 kicker text-muted-foreground">
         <span>
           Turnovers{" "}
           <span className="font-medium tabular-nums text-foreground">
@@ -1370,11 +1834,14 @@ const ZONE_THRESHOLDS: Record<keyof ShotCounts, { ok: number; good: number }> = 
   three: { ok: 0.3, good: 0.37 },
 }
 
+// Traffic-light efficiency grade — muted, print-friendly tones so it reads as
+// a newspaper stat graphic, not neon: hot zones go basil green, ok zones a
+// warm ochre, cold zones brick red, and empty zones a faint muted ink.
 const ZONE_COLORS = {
-  good: { fill: "rgba(16,185,129,0.30)", stroke: "rgba(16,185,129,0.55)" },
-  ok: { fill: "rgba(234,179,8,0.32)", stroke: "rgba(234,179,8,0.60)" },
-  poor: { fill: "rgba(239,68,68,0.28)", stroke: "rgba(239,68,68,0.55)" },
-  none: { fill: "rgba(148,163,184,0.14)", stroke: "rgba(148,163,184,0.40)" },
+  good: { fill: "rgba(74,140,82,0.32)", stroke: "rgba(74,140,82,0.66)" },
+  ok: { fill: "rgba(196,150,46,0.32)", stroke: "rgba(196,150,46,0.70)" },
+  poor: { fill: "rgba(198,72,50,0.30)", stroke: "rgba(198,72,50,0.64)" },
+  none: { fill: "rgba(120,113,108,0.10)", stroke: "rgba(120,113,108,0.30)" },
 }
 
 function gradeZone(zone: keyof ShotCounts, pct: number, attempts: number) {
@@ -1422,10 +1889,8 @@ function ShotMap({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-          Shot map
-        </span>
-        <span className="font-mono text-xs uppercase tracking-wider tabular-nums text-muted-foreground">
+        <Kicker tone="muted">Shot Map</Kicker>
+        <span className="font-condensed text-xs font-bold uppercase tracking-[0.14em] tabular-nums text-muted-foreground">
           {total} FGA
         </span>
       </div>
@@ -1472,6 +1937,13 @@ function ShotMap({
           />
         </svg>
 
+        {/* A faint halftone screen over the zones — gives the colored areas a
+            printed, dotted texture rather than a flat digital fill. */}
+        <span
+          aria-hidden
+          className="halftone halftone-fade pointer-events-none absolute inset-0 opacity-40"
+        />
+
         {zones.map((zone) => (
           <ZoneChip
             key={zone.key}
@@ -1500,7 +1972,7 @@ function ZoneChip({
   return (
     <span
       style={style}
-      className="absolute left-1/2 flex -translate-x-1/2 -translate-y-1/2 items-baseline gap-1 rounded-md bg-background/85 px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wider shadow-sm ring-1 ring-border"
+      className="absolute left-1/2 flex -translate-x-1/2 -translate-y-1/2 items-baseline gap-1 rounded-sm bg-background/90 px-2 py-0.5 font-condensed text-xs font-bold uppercase tracking-[0.1em] shadow-sm ring-1 ring-border"
     >
       <span>{label}</span>
       <span className="tabular-nums">
@@ -1606,25 +2078,19 @@ export function PlayByPlayView({
   const leader = margin > 0 ? nameA : margin < 0 ? nameB : null
 
   return (
-    <Card className="flex flex-col rounded-2xl">
+    <Card className="flex flex-col rounded-sm">
       <CardHeader className="space-y-0 pb-3">
-        <CardTitle className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-          Play-by-play
-        </CardTitle>
+        <Kicker ruled>The Running Diary</Kicker>
       </CardHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
         {enriched.length > 0 && (
           <div>
             <div className="mb-1.5 flex items-center justify-between">
-              <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                Lead margin
-              </span>
-              <span className="font-mono text-[10px] uppercase tracking-wider tabular-nums">
+              <Kicker tone="muted">Who's Ahead</Kicker>
+              <span className="kicker tabular-nums">
                 {leader ? (
                   <>
-                    <span className="text-amber-600 dark:text-amber-400">
-                      {leader}
-                    </span>{" "}
+                    <span className="text-primary">{leader}</span>{" "}
                     +{Math.abs(margin)}
                   </>
                 ) : (
@@ -1639,13 +2105,13 @@ export function PlayByPlayView({
         <div className="scrollbar-hide min-h-[20rem] flex-1 overflow-y-auto xl:min-h-0">
           {/* Sticky lane labels: who's on the left vs right of the duel. */}
           <div className="sticky top-0 z-10 grid grid-cols-[1fr_auto_1fr] items-center border-b bg-card/95 backdrop-blur">
-            <span className="truncate py-2 pr-3 text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+            <span className="block truncate py-2 pr-3 text-right font-condensed text-xs font-bold uppercase tracking-[0.12em] text-muted-foreground">
               {nameA}
             </span>
-            <span className="min-w-[4.5rem] px-3 py-2 text-center font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground/70">
+            <span className="block min-w-[4.5rem] px-3 py-2 text-center font-condensed text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground/70">
               Score
             </span>
-            <span className="truncate py-2 pl-3 text-left font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+            <span className="block truncate py-2 pl-3 text-left font-condensed text-xs font-bold uppercase tracking-[0.12em] text-muted-foreground">
               {nameB}
             </span>
           </div>
@@ -1664,7 +2130,7 @@ export function PlayByPlayView({
           ))}
 
           {enriched.length === 0 && (
-            <div className="flex min-h-[20rem] items-center justify-center font-mono text-xs uppercase tracking-wider text-muted-foreground">
+            <div className="flex min-h-[20rem] items-center justify-center font-condensed text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground">
               No plays to show
             </div>
           )}
@@ -1674,8 +2140,8 @@ export function PlayByPlayView({
   )
 }
 
-// Lead margin (score_a - score_b) over the game: amber above the centerline
-// when A is ahead, neutral below when B is ahead. Pure inline SVG.
+// Lead margin (score_a - score_b) over the game: vermillion above the
+// centerline when A is ahead, neutral below when B is ahead. Pure inline SVG.
 function MarginSparkline({ enriched }: { enriched: EnrichedPlay[] }) {
   const clipId = useId()
   const W = 600
@@ -1708,7 +2174,7 @@ function MarginSparkline({ enriched }: { enriched: EnrichedPlay[] }) {
       </defs>
       <path
         d={area}
-        className="fill-amber-500/20"
+        className="fill-primary/20"
         clipPath={`url(#${clipId}-t)`}
       />
       <path
@@ -1727,7 +2193,7 @@ function MarginSparkline({ enriched }: { enriched: EnrichedPlay[] }) {
       <polyline
         points={line}
         fill="none"
-        className="stroke-amber-500"
+        className="stroke-primary"
         strokeWidth="1.5"
         strokeLinejoin="round"
         vectorEffect="non-scaling-stroke"
@@ -1741,16 +2207,16 @@ function PossessionRow({ e, index }: { e: EnrichedPlay; index: number }) {
   const isA = side === "a"
   const made = play.result === "made" && !play.turnover
   const dotClass = play.turnover
-    ? "bg-red-500"
+    ? "bg-foreground/40"
     : made
-      ? "bg-amber-500"
+      ? "bg-primary"
       : play.foul
-        ? "bg-amber-500/60"
-        : "bg-muted-foreground/40"
+        ? "bg-primary/50"
+        : "border border-muted-foreground/40"
   const detail = play.turnover
     ? "Turnover"
     : play.foul
-      ? "Foul drawn"
+      ? "Drew a foul"
       : `${formatShotType(play.shot_type)} · ${made ? "Made" : "Missed"}`
 
   const content = (
@@ -1760,12 +2226,12 @@ function PossessionRow({ e, index }: { e: EnrichedPlay; index: number }) {
         isA ? "items-end text-right" : "items-start text-left"
       )}
     >
-      <span className="max-w-full truncate font-display text-sm font-semibold uppercase leading-none tracking-tight">
+      <span className="max-w-full truncate display text-sm leading-none">
         {play.offensive_player}
       </span>
       <span
         className={cn(
-          "flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground",
+          "flex items-center gap-1.5 font-condensed text-xs font-bold uppercase tracking-[0.12em] text-muted-foreground",
           isA && "flex-row-reverse"
         )}
       >
@@ -1786,22 +2252,22 @@ function PossessionRow({ e, index }: { e: EnrichedPlay; index: number }) {
       <div
         className={cn(
           "flex items-center justify-end py-2.5 pr-3",
-          made && isA && "border-r-2 border-amber-500"
+          made && isA && "border-r-2 border-primary"
         )}
       >
         {isA ? content : null}
       </div>
       <div className="flex min-w-[4.5rem] flex-col items-center justify-center gap-0.5 border-x border-border/60 bg-muted/20 px-3 py-2">
-        <span className="flex items-baseline gap-1 font-display text-lg font-bold tabular-nums leading-none">
-          <span className={play.score_a > play.score_b ? "text-amber-500" : ""}>
+        <span className="flex items-baseline gap-1 font-display text-lg font-black tabular-nums leading-none">
+          <span className={play.score_a > play.score_b ? "text-primary" : ""}>
             {play.score_a}
           </span>
           <span className="text-xs text-muted-foreground">–</span>
-          <span className={play.score_b > play.score_a ? "text-amber-500" : ""}>
+          <span className={play.score_b > play.score_a ? "text-primary" : ""}>
             {play.score_b}
           </span>
         </span>
-        <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground tabular-nums">
+        <span className="kicker text-muted-foreground tabular-nums">
           {play.score_a === play.score_b
             ? "Tied"
             : `+${Math.abs(play.score_a - play.score_b)}`}
@@ -1810,7 +2276,7 @@ function PossessionRow({ e, index }: { e: EnrichedPlay; index: number }) {
       <div
         className={cn(
           "flex items-center justify-start py-2.5 pl-3",
-          made && !isA && "border-l-2 border-amber-500"
+          made && !isA && "border-l-2 border-primary"
         )}
       >
         {!isA ? content : null}
@@ -1822,22 +2288,22 @@ function PossessionRow({ e, index }: { e: EnrichedPlay; index: number }) {
 function LeadChangeDivider() {
   return (
     <div className="flex items-center gap-2 px-2 py-1.5">
-      <div className="h-px flex-1 bg-amber-500/30" />
-      <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-amber-600 dark:text-amber-400">
-        Lead change
+      <div className="h-px flex-1 bg-primary/30" />
+      <span className="kicker text-primary">
+        Lead Changes Hands
       </span>
-      <div className="h-px flex-1 bg-amber-500/30" />
+      <div className="h-px flex-1 bg-primary/30" />
     </div>
   )
 }
 
 function RunBanner({ name, points }: { name: string; points: number }) {
   return (
-    <div className="my-1 flex items-center justify-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5">
-      <span className="font-display text-sm font-semibold uppercase tracking-tight text-amber-600 dark:text-amber-400">
+    <div className="my-1 flex items-center justify-center gap-2 rounded-sm border border-primary/30 bg-primary/10 px-3 py-1.5">
+      <span className="display text-sm text-primary">
         {name}
       </span>
-      <span className="font-mono text-[10px] uppercase tracking-wider tabular-nums text-amber-600/80 dark:text-amber-400/80">
+      <span className="kicker tabular-nums text-primary/80">
         {points}-0 run
       </span>
     </div>
@@ -1890,8 +2356,19 @@ function formatPct(value: number) {
   return `${(value * 100).toFixed(1)}%`
 }
 
-function titleCase(value: string) {
-  return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase()
+function lastNameOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  return parts[parts.length - 1] ?? name
+}
+
+// The editorial verdict line above the win-probability bar, scaled to how
+// lopsided the favorite's win rate is.
+function verdictHeadline(favoriteName: string, favoritePct: number): string {
+  const last = lastNameOf(favoriteName)
+  if (favoritePct >= 80) return "It Isn't Close."
+  if (favoritePct >= 65) return `${last} Has the Edge.`
+  if (favoritePct >= 55) return `${last}, Narrowly.`
+  return "Too Close to Call."
 }
 
 function formatShotType(shotType: string) {

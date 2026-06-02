@@ -184,7 +184,7 @@ export function BracketTree<M>({
       className="relative flex min-w-max items-stretch justify-center gap-6"
     >
       <svg
-        className="pointer-events-none absolute inset-0 z-0 h-full w-full overflow-visible text-border"
+        className="pointer-events-none absolute inset-0 z-0 h-full w-full overflow-visible text-foreground/25"
         width={dims.w}
         height={dims.h}
         aria-hidden
@@ -195,19 +195,35 @@ export function BracketTree<M>({
             d={connector.d}
             fill="none"
             stroke="currentColor"
-            strokeWidth={2}
-            strokeLinejoin="round"
+            strokeWidth={1.5}
+            strokeLinejoin="miter"
           />
         ))}
       </svg>
 
-      {columns.map((column) => (
+      {columns.map((column) => {
+        const isFinal = column.side === "center"
+        return (
         <div
           key={column.key}
           className={cn("relative z-10 flex flex-col", columnClassName)}
         >
-          <div className="mb-3 text-center font-display text-sm font-medium uppercase tracking-wider text-muted-foreground">
-            {roundName(column.roundNumber, totalRounds)}
+          <div className="mb-4 flex flex-col items-center gap-1.5">
+            <span
+              className={cn(
+                "font-display text-sm font-black uppercase leading-none tracking-tight",
+                isFinal ? "text-primary" : "text-foreground"
+              )}
+            >
+              {roundName(column.roundNumber, totalRounds)}
+            </span>
+            <span
+              aria-hidden
+              className={cn(
+                "h-0.5 w-8",
+                isFinal ? "bg-primary" : "bg-foreground/30"
+              )}
+            />
           </div>
           <div className="flex flex-1 flex-col justify-around gap-4">
             {column.entries.map(({ matchup, matchupIndex }) => (
@@ -224,7 +240,8 @@ export function BracketTree<M>({
             ))}
           </div>
         </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

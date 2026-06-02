@@ -1,8 +1,14 @@
 import { ReactNode } from "react"
-import { ArrowLeftRight, ScatterChart, TrendingUp } from "lucide-react"
+import { ScatterChart } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import { Kicker } from "@/components/editorial"
 import { cn } from "@/lib/utils"
 import { PlayerProfile } from "@/hooks/usePlayerSearch"
 import { PlayerSeasonStats } from "@/hooks/usePlayerSeasons"
@@ -43,39 +49,41 @@ export default function TendencyComparisonPanel({
   const stocksB = defensiveStocks(statsB)
 
   return (
-    <Card className="mt-6 rounded-2xl border bg-card">
+    <Card className="mt-6 rounded-sm border bg-card">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
-          <ArrowLeftRight className="h-3.5 w-3.5" />
-          Matchup comparison
-        </CardTitle>
+        <Kicker ruled>Head to Head</Kicker>
+        {/* Title on the left; the matchup (each player's name · season + a
+            shot-chart icon) rides the same line on the right, flanking "vs." */}
+        <div className="flex flex-col gap-x-6 gap-y-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="space-y-2">
+            <CardTitle className="font-display text-3xl font-black uppercase tracking-tight sm:text-4xl">
+              By the Numbers
+            </CardTitle>
+            <p className="font-display text-sm italic leading-relaxed text-muted-foreground">
+              Where the matchup is won and lost.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <PlayerHeading
+              name={playerA.name}
+              season={seasonA}
+              onViewShotChart={() => onViewShotChart(playerA, seasonA)}
+            />
+            <span className="font-display text-xl font-black italic leading-none text-muted-foreground/50">
+              vs.
+            </span>
+            <PlayerHeading
+              name={playerB.name}
+              season={seasonB}
+              onViewShotChart={() => onViewShotChart(playerB, seasonB)}
+            />
+          </div>
+        </div>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* Header row: each player's name, season, and shot-chart trigger. */}
-        <div className="grid grid-cols-[1fr_auto_1fr] items-start gap-3">
-          <PlayerHeading
-            align="left"
-            name={playerA.name}
-            season={seasonA}
-            onViewShotChart={() => onViewShotChart(playerA, seasonA)}
-          />
-          <div className="flex flex-col items-center self-center">
-            <span className="font-display text-2xl font-black italic leading-none text-muted-foreground/50">
-              VS
-            </span>
-            <span className="mt-1 h-6 w-px bg-border" />
-          </div>
-          <PlayerHeading
-            align="right"
-            name={playerB.name}
-            season={seasonB}
-            onViewShotChart={() => onViewShotChart(playerB, seasonB)}
-          />
-        </div>
-
         {/* Scoring & shooting — efficiency/rate metrics the player cards (which
             show raw per-game volume) don't surface. */}
-        <Section title="Scoring & shooting">
+        <Section title="The Scoring Case">
           <CompareRow
             label="True shooting %"
             a={formatPct(tsA)}
@@ -112,7 +120,7 @@ export default function TendencyComparisonPanel({
 
         {/* Playmaking & defense — replaces the Physical section, whose
             height/weight/wingspan already appear on each player card. */}
-        <Section title="Playmaking & defense">
+        <Section title="Facilitating & Defense">
           <CompareRow
             label="Assist-to-turnover ratio"
             a={astToA.toFixed(1)}
@@ -147,9 +155,8 @@ export default function TendencyComparisonPanel({
 
         {/* Highlighted differentials */}
         <div>
-          <div className="mb-3 flex items-center gap-1.5 font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
-            <TrendingUp className="h-3.5 w-3.5" />
-            Key differentials
+          <div className="mb-3">
+            <Kicker>The Deciding Margins</Kicker>
           </div>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             <DifferentialTile
@@ -180,31 +187,34 @@ export default function TendencyComparisonPanel({
 function PlayerHeading({
   name,
   season,
-  align,
   onViewShotChart,
 }: {
   name: string
   season: string
-  align: "left" | "right"
   onViewShotChart: () => void
 }) {
   return (
-    <div className={cn("space-y-1.5", align === "right" && "text-right")}>
-      <div className="truncate font-display text-lg font-bold uppercase leading-none tracking-tight">
-        {name}
+    // Compact inline unit so it can ride the title's line: name · season + a
+    // shot-chart icon (label moved to a tooltip to keep the row tight).
+    <div className="flex items-center gap-2.5">
+      <div className="leading-tight">
+        <div className="display text-lg leading-none">{name}</div>
+        <div className="mt-1 kicker text-muted-foreground">{season} season</div>
       </div>
-      <div className="font-mono text-[0.6rem] uppercase tracking-wider text-muted-foreground">
-        {season} season
-      </div>
-      <Button
-        variant="outline"
-        size="sm"
-        className="h-7 font-mono text-xs uppercase tracking-wider"
-        onClick={onViewShotChart}
-      >
-        <ScatterChart className="h-3.5 w-3.5" />
-        View Shot Chart
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label={`View ${name} shot chart`}
+            className="size-8 shrink-0 border-foreground/30 bg-background/60 hover:bg-foreground hover:text-background"
+            onClick={onViewShotChart}
+          >
+            <ScatterChart className="h-3.5 w-3.5 text-primary" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Shot chart</TooltipContent>
+      </Tooltip>
     </div>
   )
 }
@@ -212,10 +222,10 @@ function PlayerHeading({
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div>
-      <div className="mb-2 font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
-        {title}
+      <div className="mb-2">
+        <Kicker tone="muted">{title}</Kicker>
       </div>
-      <div className="divide-y overflow-hidden rounded-xl border">
+      <div className="divide-y overflow-hidden rounded-sm border">
         {children}
       </div>
     </div>
@@ -237,26 +247,24 @@ function CompareRow({
     <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-3 py-2.5 text-sm">
       <span
         className={cn(
-          "text-left font-mono font-medium tabular-nums",
-          edge === "a"
-            ? "text-amber-600 dark:text-amber-400"
-            : "text-foreground"
+          "flex items-center justify-start gap-1.5 text-left font-display font-bold tabular-nums",
+          edge === "a" ? "text-primary" : "text-foreground"
         )}
       >
+        {edge === "a" && <span aria-hidden>▸</span>}
         {a}
       </span>
-      <span className="text-center font-mono text-[0.6rem] uppercase tracking-wider text-muted-foreground">
+      <span className="text-center kicker text-muted-foreground">
         {label}
       </span>
       <span
         className={cn(
-          "text-right font-mono font-medium tabular-nums",
-          edge === "b"
-            ? "text-amber-600 dark:text-amber-400"
-            : "text-foreground"
+          "flex items-center justify-end gap-1.5 text-right font-display font-bold tabular-nums",
+          edge === "b" ? "text-primary" : "text-foreground"
         )}
       >
         {b}
+        {edge === "b" && <span aria-hidden>◂</span>}
       </span>
     </div>
   )
@@ -274,19 +282,19 @@ function DifferentialTile({
   edge: boolean
 }) {
   return (
-    <div className="rounded-xl border bg-muted/30 px-3 py-2.5">
-      <div className="font-mono text-[0.6rem] uppercase tracking-wider text-muted-foreground">
+    <div className="rounded-sm border bg-muted/30 px-3 py-2.5">
+      <div className="kicker text-muted-foreground">
         {label}
       </div>
       <div
         className={cn(
-          "font-display text-2xl font-black uppercase leading-none tracking-tight tabular-nums",
-          edge && "text-amber-600 dark:text-amber-400"
+          "mt-1 font-display text-3xl font-black leading-none tabular-nums",
+          edge ? "text-primary" : "text-foreground"
         )}
       >
         {value}
       </div>
-      <div className="mt-1 truncate font-mono text-[0.6rem] uppercase tracking-wider text-muted-foreground">
+      <div className="mt-1 truncate kicker text-muted-foreground">
         {detail}
       </div>
     </div>

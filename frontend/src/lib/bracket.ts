@@ -125,3 +125,16 @@ export function participantLabel(participant: {
 }): string {
   return participant.name ?? `Player #${participant.player_id}`
 }
+
+// A compact label for tight slots: the last name only (e.g. "Gilgeous-Alexander"
+// from "Shai Gilgeous-Alexander"). Single-token names and unresolved players
+// fall back to the full participant label so nothing renders blank.
+export function participantLastName(participant: {
+  name?: string | null
+  player_id: number
+}): string {
+  const full = participantLabel(participant)
+  if (!participant.name) return full
+  const tokens = participant.name.trim().split(/\s+/).filter(Boolean)
+  return tokens.length > 1 ? tokens[tokens.length - 1] : full
+}

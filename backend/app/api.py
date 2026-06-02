@@ -2,6 +2,7 @@ import csv
 import json
 import os
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import unquote
@@ -169,7 +170,13 @@ class PlayerSeasonStats(BaseModel):
 
 
 def _normalize_name(name: str) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
+    # Fold accents to ASCII first (Jokić -> Jokic, Dončić -> Doncic) so a query
+    # typed without diacritics still matches the static index's accented names.
+    # Without this the regex below strips the accented letter to a space and the
+    # names never line up (e.g. "nikola joki" vs "nikola jokic").
+    decomposed = unicodedata.normalize("NFKD", name)
+    ascii_name = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]+", " ", ascii_name.lower()).strip()
 
 
 def _normalize_player_search_name(name: str) -> str:
@@ -671,7 +678,12 @@ _BRACKET_KV_TTL_SECONDS = 86400
 
 # Initialized once at module level (not per-request). It is None when the KV
 # credentials are absent (or the client library is unavailable) so the server
-# still starts; bracket endpoints then return a clear 500 (DEPLOY-009).
+# still starts. KV is an OPTIONAL durability layer over the orchestrator's
+# in-process session store: when it's configured, brackets survive serverless
+# cold starts and can be shared across instances; when it isn't (e.g. local
+# dev), the endpoints fall back to in-memory sessions — brackets are ephemeral /
+# session-only by design, so this degrades gracefully exactly like the NBA-stats
+# client's optional cache rather than erroring (see DEPLOY-009 history).
 _KV_REST_API_URL = os.getenv("KV_REST_API_URL")
 _KV_REST_API_TOKEN = os.getenv("KV_REST_API_TOKEN")
 _kv_redis = (
@@ -681,20 +693,6 @@ _kv_redis = (
 )
 
 
-def _require_kv():
-    # Surfaced as HTTP 500 by the bracket endpoints rather than an unhandled
-    # AttributeError on a None client (DEPLOY-009).
-    if _kv_redis is None:
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                "Bracket persistence is unavailable: set KV_REST_API_URL and "
-                "KV_REST_API_TOKEN to enable bracket endpoints."
-            ),
-        )
-    return _kv_redis
-
-
 def _kv_key(bracket_id: str) -> str:
     return f"bracket:{bracket_id}"
 
@@ -702,16 +700,29 @@ def _kv_key(bracket_id: str) -> str:
 async def _kv_save_bracket(
     bracket_id: str, state: BracketState, possession_mode: str
 ) -> None:
-    redis = _require_kv()
+    # No-op when KV is absent: the orchestrator already holds the live session
+    # in memory, so skipping the durable write loses nothing on a single
+    # instance. A KV outage must never break a simulation.
+    if _kv_redis is None:
+        return
     payload = json.dumps(
         {"state": state.model_dump(mode="json"), "possession_mode": possession_mode}
     )
-    await redis.set(_kv_key(bracket_id), payload, ex=_BRACKET_KV_TTL_SECONDS)
+    try:
+        await _kv_redis.set(_kv_key(bracket_id), payload, ex=_BRACKET_KV_TTL_SECONDS)
+    except Exception:
+        # Persistence is best-effort; the in-memory session remains the source
+        # of truth for the rest of this process's lifetime.
+        pass
 
 
 async def _kv_load_bracket(bracket_id: str) -> tuple[BracketState, str] | None:
-    redis = _require_kv()
-    raw = await redis.get(_kv_key(bracket_id))
+    if _kv_redis is None:
+        return None
+    try:
+        raw = await _kv_redis.get(_kv_key(bracket_id))
+    except Exception:
+        return None
     if raw is None:
         return None
     data = json.loads(raw)
@@ -720,17 +731,21 @@ async def _kv_load_bracket(bracket_id: str) -> tuple[BracketState, str] | None:
 
 
 async def _hydrate_session(bracket_id: str) -> str:
-    # Load the persisted bracket from KV and inject it into the orchestrator's
-    # in-process store so the existing get_state/run_round/run_all paths operate
-    # on the durable session even after a cold start. Raises 404 when absent.
+    # Prefer the durable KV copy (injecting it into the in-process store so the
+    # existing get_state/run_round/run_all paths work even after a cold start).
+    # When KV is unavailable, fall back to the session create_bracket/run_round
+    # already keep in memory. 404 only when the bracket is in neither place.
     loaded = await _kv_load_bracket(bracket_id)
-    if loaded is None:
-        raise HTTPException(status_code=404, detail="Bracket not found")
-    state, possession_mode = loaded
-    bracket_orchestrator._sessions[bracket_id] = _BracketSession(
-        state=state, possession_mode=possession_mode
-    )
-    return possession_mode
+    if loaded is not None:
+        state, possession_mode = loaded
+        bracket_orchestrator._sessions[bracket_id] = _BracketSession(
+            state=state, possession_mode=possession_mode
+        )
+        return possession_mode
+    session = bracket_orchestrator._sessions.get(bracket_id)
+    if session is not None:
+        return session.possession_mode
+    raise HTTPException(status_code=404, detail="Bracket not found")
 
 
 class CreateBracketResponse(BaseModel):

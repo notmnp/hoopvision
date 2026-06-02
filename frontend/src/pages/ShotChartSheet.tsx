@@ -48,19 +48,19 @@ export default function ShotChartSheet({
     <Dialog open={target !== null} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle className="font-display text-2xl font-black uppercase tracking-tight">
+          <DialogTitle className="display text-2xl">
             {target ? target.playerName : "Shot chart"}
           </DialogTitle>
-          <DialogDescription className="font-mono text-[0.65rem] uppercase tracking-wider text-muted-foreground">
-            {target ? `${target.seasonId} season shot chart` : "Shot chart"}
+          <DialogDescription className="kicker">
+            {target ? `Shot Report — ${target.seasonId}` : "Shot Report"}
           </DialogDescription>
         </DialogHeader>
 
         <div>
           {loading ? (
-            <div className="flex items-center justify-center gap-2 py-16 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+            <div className="flex items-center justify-center gap-2 py-16 font-condensed text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" />
-              Loading shot chart…
+              Developing the shot report…
             </div>
           ) : error ? (
             <Alert variant="destructive">
@@ -84,10 +84,10 @@ function DataWarning({ warnings }: { warnings: string[] }) {
     ? warnings
     : ["Shot location data is unavailable for this season."]
   return (
-    <Alert className="border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300 [&>svg]:text-amber-600 dark:[&>svg]:text-amber-400">
+    <Alert className="border-primary/40 bg-primary/10 text-primary [&>svg]:text-primary">
       <AlertTriangle className="h-4 w-4" />
       <AlertTitle>Shot data unavailable</AlertTitle>
-      <AlertDescription className="text-amber-700/90 dark:text-amber-300/90">
+      <AlertDescription className="text-primary/90">
         <ul className="list-disc space-y-1 pl-4">
           {messages.map((message) => (
             <li key={message}>{message}</li>
@@ -136,12 +136,12 @@ function ShotChartCourt({ zones }: { zones: ShotZone[] }) {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between font-mono text-[0.65rem] uppercase tracking-wider text-muted-foreground">
-        <span>Marker size = attempts · color = FG%</span>
+      <div className="flex items-center justify-between font-condensed text-xs font-bold uppercase tracking-[0.12em] text-muted-foreground">
+        <span>Bigger dot = more shots · warmer = better clip</span>
         <span className="tabular-nums">{totalAttempts} FGA</span>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border bg-muted/20">
+      <div className="overflow-hidden rounded-sm border bg-muted/20">
         <svg viewBox="0 0 500 470" className="h-auto w-full">
           <CourtLines />
           {positioned.map((zone) => {
@@ -191,35 +191,35 @@ function ShotChartCourt({ zones }: { zones: ShotZone[] }) {
 function ZoneDetail({ zone }: { zone: ShotZone | null }) {
   if (!zone) {
     return (
-      <div className="rounded-2xl border bg-background/60 px-3 py-2 font-mono text-[0.65rem] uppercase tracking-wider text-muted-foreground">
+      <div className="rounded-sm border bg-background/60 px-3 py-2 font-condensed text-xs font-bold uppercase tracking-[0.12em] text-muted-foreground">
         Hover or tap a zone to see attempts and field-goal percentage.
       </div>
     )
   }
   return (
-    <div className="flex items-center justify-between rounded-2xl border bg-background/60 px-3 py-2 text-sm">
+    <div className="flex items-center justify-between rounded-sm border bg-background/60 px-3 py-2 text-sm">
       <div>
-        <div className="font-display text-lg font-bold uppercase tracking-tight leading-none">
+        <div className="display text-lg leading-none">
           {zone.zone_label}
         </div>
-        <div className="mt-1 font-mono text-[0.6rem] uppercase tracking-wider text-muted-foreground">
+        <div className="mt-1 kicker text-muted-foreground">
           {zone.zone_area}
         </div>
       </div>
       <div className="flex items-center gap-4">
         <div className="text-right">
-          <div className="font-mono text-[0.6rem] uppercase tracking-wider text-muted-foreground">
+          <div className="kicker text-muted-foreground">
             Made / Att
           </div>
-          <div className="font-mono text-sm font-medium tabular-nums">
+          <div className="font-display text-base font-bold tabular-nums">
             {zone.made} / {zone.attempts}
           </div>
         </div>
         <div className="text-right">
-          <div className="font-mono text-[0.6rem] uppercase tracking-wider text-muted-foreground">
+          <div className="kicker text-muted-foreground">
             FG%
           </div>
-          <div className="font-mono text-sm font-medium tabular-nums">
+          <div className="font-display text-base font-bold tabular-nums">
             {formatPct(zone.fg_pct)}
           </div>
         </div>
@@ -254,14 +254,13 @@ function CourtLines() {
   )
 }
 
-// Map FG% to a red→amber→green gradient across a realistic 20%–60% band.
+// Map FG% to a cool→hot gradient across a realistic 20%–60% band: cold shooting
+// reads as muted ink, a hot clip reads as editorial vermillion.
 function efficiencyColor(fgPct: number): string {
   const t = clamp((fgPct - 0.2) / (0.6 - 0.2), 0, 1)
-  const red = [239, 68, 68]
-  const amber = [234, 179, 8]
-  const green = [16, 185, 129]
-  const rgb =
-    t < 0.5 ? mix(red, amber, t / 0.5) : mix(amber, green, (t - 0.5) / 0.5)
+  const cold = [120, 113, 108] // muted ink
+  const vermillion = [225, 74, 47] // editorial primary
+  const rgb = mix(cold, vermillion, t)
   return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`
 }
 

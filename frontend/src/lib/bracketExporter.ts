@@ -31,12 +31,21 @@ export async function exportBracketImage(
 ): Promise<void> {
   if (!node) return
 
+  // Make sure the design's web fonts (Fraunces display + Archivo sans) are
+  // actually loaded before we rasterize — otherwise html2canvas captures the
+  // tree in a fallback serif/sans and the canvas branding below falls back too.
+  await ensureBrandFontsLoaded()
+
   const { default: html2canvas } = await import("html2canvas-pro")
 
   const scale = window.devicePixelRatio > 1 ? 2 : 1
   const background = getComputedBackgroundColor(node)
 
-  const bracketCanvas = await html2canvas(node, {
+  // `node` is the horizontally-scrolling wrapper; capture the full-width tree
+  // inside it so a wide (16-team) bracket isn't clipped to the visible viewport.
+  const target = (node.firstElementChild as HTMLElement | null) ?? node
+
+  const bracketCanvas = await html2canvas(target, {
     // useCORS lets the proxied headshots (served with CORS headers and requested
     // crossOrigin) be drawn into the canvas without tainting it.
     useCORS: true,
@@ -48,7 +57,7 @@ export async function exportBracketImage(
     // renders unreliably; getComputedStyle on the live node returns the already
     // mixed rgba, so copying it onto the clone guarantees those greens show up.
     onclone: (_doc, clonedRoot) => {
-      const originals = [node, ...node.querySelectorAll<HTMLElement>("*")]
+      const originals = [target, ...target.querySelectorAll<HTMLElement>("*")]
       const clones = [
         clonedRoot as HTMLElement,
         ...clonedRoot.querySelectorAll<HTMLElement>("*"),
@@ -56,9 +65,18 @@ export async function exportBracketImage(
       const count = Math.min(originals.length, clones.length)
       for (let i = 0; i < count; i++) {
         const computed = window.getComputedStyle(originals[i])
-        clones[i].style.backgroundColor = computed.backgroundColor
-        clones[i].style.color = computed.color
-        clones[i].style.borderColor = computed.borderColor
+        const clone = clones[i]
+        clone.style.backgroundColor = computed.backgroundColor
+        clone.style.color = computed.color
+        clone.style.borderColor = computed.borderColor
+        // Kill entrance animations in the clone. The matchup cards use
+        // `animate-in fade-in` with `animation-fill-mode: both`, so in the
+        // freshly-cloned document the animation is at t=0 — frozen at its
+        // initial opacity:0 / translated keyframe — and the capture would grab
+        // every card invisible. Disabling the animation lets each element fall
+        // back to its resting style (opacity 1), while genuine opacity utilities
+        // (e.g. an eliminated row's opacity-40) are left untouched.
+        clone.style.animation = "none"
       }
     },
   })
@@ -114,14 +132,38 @@ async function drawBranding(
   ctx.fillStyle = textColor
   ctx.textBaseline = "alphabetic"
 
-  // Wordmark on top, the page title beneath it (dimmed to read as a subtitle).
-  ctx.font = `700 ${21 * scale}px Inter, system-ui, -apple-system, sans-serif`
-  ctx.fillText("Hooper", textX, y + 19 * scale)
+  // Wordmark in the display serif (Fraunces, matching the masthead), with the
+  // page title beneath it as a tracked Archivo kicker — the app's two type
+  // families, so the poster reads in the same voice as the site.
+  ctx.font = `900 ${23 * scale}px Fraunces, Georgia, "Times New Roman", serif`
+  ctx.fillText("Hooper", textX, y + 20 * scale)
 
-  ctx.globalAlpha = 0.6
-  ctx.font = `500 ${15 * scale}px Inter, system-ui, -apple-system, sans-serif`
-  ctx.fillText("GOAT Brackets", textX, y + 40 * scale)
+  ctx.globalAlpha = 0.65
+  // letterSpacing is a recent canvas property; guard it for older engines.
+  const spacedCtx = ctx as CanvasRenderingContext2D & { letterSpacing?: string }
+  const prevSpacing = spacedCtx.letterSpacing
+  spacedCtx.letterSpacing = `${1.6 * scale}px`
+  ctx.font = `700 ${12 * scale}px Archivo, "Helvetica Neue", system-ui, sans-serif`
+  ctx.fillText("GOAT BRACKETS", textX, y + 39 * scale)
+  if (prevSpacing !== undefined) spacedCtx.letterSpacing = prevSpacing
   ctx.globalAlpha = 1
+}
+
+// Force the brand faces used by the capture + canvas branding to load. Best
+// effort: a font failure must never block the export (it just falls back).
+async function ensureBrandFontsLoaded(): Promise<void> {
+  if (!("fonts" in document)) return
+  try {
+    await Promise.all([
+      document.fonts.load('900 23px "Fraunces"'),
+      document.fonts.load('800 24px "Fraunces"'),
+      document.fonts.load('700 12px "Archivo"'),
+      document.fonts.load('400 14px "Archivo"'),
+    ])
+    await document.fonts.ready
+  } catch {
+    // Fall back to system fonts rather than failing the export.
+  }
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {

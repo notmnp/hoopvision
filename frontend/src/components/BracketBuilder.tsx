@@ -5,9 +5,10 @@ import {
   BracketSlot,
   EMPTY_SLOT,
   headshotUrl,
+  participantLastName,
   standardSeedOrder,
 } from "@/lib/bracket"
-import { BracketTree } from "@/components/BracketTree"
+import { HalftoneAvatar } from "@/components/editorial"
 import { PlayerSearchCombobox } from "@/components/PlayerSearchCombobox"
 import { Button } from "@/components/ui/button"
 import {
@@ -20,40 +21,28 @@ import {
 import { PlayerProfile } from "@/hooks/usePlayerSearch"
 import { usePlayerSeasons } from "@/hooks/usePlayerSeasons"
 
-// A first-round pairing references the two seeds (1-based) that face off. Later
-// rounds carry no seeds — they're rendered as empty "to be decided" cells.
-interface SetupMatchup {
-  seed_a: number | null
-  seed_b: number | null
+// A first-round pairing: the two seeds (1-based) that face off in round one.
+interface SeedPairing {
+  seed_a: number
+  seed_b: number
 }
 
-// Builds the bracket-shaped round structure for the setup tree: round 1 carries
-// the seed pairings from the standard seed order; later rounds are placeholders
-// sized to the tree so the BracketTree can lay out the full NBA-style fan.
-function buildSetupRounds(size: number) {
+// The first-round matchups from the standard seed order (1v16, 8v9, …). The
+// setup only ever seeds round one, so we never build the later rounds — they're
+// produced server-side when the bracket runs.
+function firstRoundPairings(size: number): SeedPairing[] {
   const order = standardSeedOrder(size)
-  const firstRound: SetupMatchup[] = []
+  const pairs: SeedPairing[] = []
   for (let i = 0; i < order.length; i += 2) {
-    firstRound.push({ seed_a: order[i], seed_b: order[i + 1] })
+    pairs.push({ seed_a: order[i], seed_b: order[i + 1] })
   }
-
-  const rounds = [{ round_number: 1, matchups: firstRound }]
-  const totalRounds = Math.round(Math.log2(size))
-  for (let r = 2; r <= totalRounds; r++) {
-    const count = size / 2 ** r
-    rounds.push({
-      round_number: r,
-      matchups: Array.from({ length: count }, () => ({
-        seed_a: null,
-        seed_b: null,
-      })),
-    })
-  }
-  return rounds
+  return pairs
 }
 
-// The setup-phase body: an editable NBA-style bracket whose first-round cells
-// are player pickers and whose later rounds are "Awaiting winner" placeholders.
+// The setup-phase body: a scroll-free, responsive grid of first-round matchup
+// cards. Each card is one pairing (two seed slots). No tree, no horizontal
+// scroll — even a 16-team field stays a tidy two-column list. This mirrors the
+// running board's round-view matchup grid for a consistent mental model.
 export function BracketBuilder({
   size,
   slots,
@@ -65,61 +54,41 @@ export function BracketBuilder({
   onUpdateSlot: (index: number, slot: BracketSlot) => void
   disabled?: boolean
 }) {
-  const rounds = buildSetupRounds(size)
+  const pairings = firstRoundPairings(size)
 
   return (
-    <div className="overflow-x-auto pb-4">
-      <BracketTree
-        rounds={rounds}
-        renderMatchup={(matchup, ctx) => {
-          if (ctx.roundNumber !== 1) {
-            return <PlaceholderMatchup />
-          }
-          const indexA = (matchup.seed_a as number) - 1
-          const indexB = (matchup.seed_b as number) - 1
-          return (
-            <div className="overflow-hidden rounded-lg border bg-card shadow-sm">
-              <SlotPicker
-                slot={slots[indexA]}
-                onChange={(next) => onUpdateSlot(indexA, next)}
-                disabled={disabled}
-                seed={matchup.seed_a as number}
-                ariaLabel={`Pick player for seed ${matchup.seed_a}`}
-              />
-              <div className="border-t" />
-              <SlotPicker
-                slot={slots[indexB]}
-                onChange={(next) => onUpdateSlot(indexB, next)}
-                disabled={disabled}
-                seed={matchup.seed_b as number}
-                ariaLabel={`Pick player for seed ${matchup.seed_b}`}
-              />
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      {pairings.map((pair, i) => {
+        const indexA = pair.seed_a - 1
+        const indexB = pair.seed_b - 1
+        return (
+          <div
+            key={i}
+            className="overflow-hidden rounded-sm border bg-card"
+          >
+            <div className="flex items-center border-b bg-muted/30 px-2.5 py-1.5">
+              <span className="kicker text-muted-foreground">
+                Matchup {i + 1}
+              </span>
             </div>
-          )
-        }}
-      />
-    </div>
-  )
-}
-
-// An empty cell for a not-yet-decided matchup in rounds beyond the first.
-function PlaceholderMatchup() {
-  return (
-    <div className="rounded-lg border border-dashed bg-muted/20 shadow-sm">
-      <PlaceholderRow />
-      <div className="border-t border-dashed" />
-      <PlaceholderRow />
-    </div>
-  )
-}
-
-function PlaceholderRow() {
-  return (
-    <div className="flex items-center gap-2.5 p-2.5">
-      <div className="h-9 w-9 shrink-0 rounded-md border border-dashed bg-muted/40" />
-      <span className="font-mono text-[0.65rem] uppercase tracking-wider text-muted-foreground">
-        Awaiting winner
-      </span>
+            <SlotPicker
+              slot={slots[indexA]}
+              onChange={(next) => onUpdateSlot(indexA, next)}
+              disabled={disabled}
+              seed={pair.seed_a}
+              ariaLabel={`Pick player for seed ${pair.seed_a}`}
+            />
+            <div className="border-t" />
+            <SlotPicker
+              slot={slots[indexB]}
+              onChange={(next) => onUpdateSlot(indexB, next)}
+              disabled={disabled}
+              seed={pair.seed_b}
+              ariaLabel={`Pick player for seed ${pair.seed_b}`}
+            />
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -174,31 +143,23 @@ function SlotPicker({
   if (slot.player_id !== null) {
     return (
       <div className="flex items-center gap-2.5 p-2.5">
-        <span className="w-4 shrink-0 text-center font-mono text-[0.65rem] font-medium uppercase tracking-wider tabular-nums text-amber-600 dark:text-amber-400">
-          {seed}
-        </span>
-        {/* Plain <img> (not the Radix Avatar) with crossOrigin="anonymous" so it
-            loads via our CORS proxy and stays consistent with the bracket board
-            (ADR-006); Radix Avatar.Image's load detection fails for these. The
-            initials sit underneath and show through if the photo errors. */}
-        <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded-md border bg-muted ring-2 ring-amber-500">
-          <span className="flex h-full w-full items-center justify-center font-mono text-[10px] font-medium uppercase text-muted-foreground">
-            {slot.name ? getInitials(slot.name) : "?"}
-          </span>
-          <img
-            src={headshotUrl(slot.player_id)}
-            alt={slot.name ?? ""}
-            crossOrigin="anonymous"
-            loading="eager"
-            onError={(event) => {
-              event.currentTarget.style.visibility = "hidden"
-            }}
-            className="absolute inset-0 h-full w-full object-cover object-top"
-          />
-        </div>
+        {/* HalftoneAvatar renders the proxied headshot as a duotone print
+            cutout; its initials fallback shows if the photo errors. The setup
+            tree isn't part of the PNG export, so crossOrigin isn't required
+            here (unlike the running board's MatchupCard). */}
+        <HalftoneAvatar
+          src={headshotUrl(slot.player_id)}
+          alt={slot.name ?? `Player #${slot.player_id}`}
+          fallback={slot.name ? getInitials(slot.name) : "?"}
+          size={36}
+          active
+        />
         <div className="min-w-0 flex-1">
-          <div className="truncate font-display text-base font-bold uppercase leading-tight tracking-tight text-amber-600 dark:text-amber-400">
-            {slot.name ?? `Player #${slot.player_id}`}
+          <div
+            title={slot.name ?? `Player #${slot.player_id}`}
+            className="line-clamp-2 font-display text-sm font-bold uppercase leading-tight tracking-tight text-foreground"
+          >
+            {participantLastName({ name: slot.name, player_id: slot.player_id })}
           </div>
           <Select
             value={slot.season_id ?? undefined}
@@ -207,7 +168,7 @@ function SlotPicker({
           >
             <SelectTrigger
               aria-label={`Select season — ${slot.name ?? "player"}`}
-              className="mt-0 h-5! gap-1.5 border-none bg-transparent px-0 py-0! font-mono text-[0.65rem] uppercase tracking-wider tabular-nums text-muted-foreground shadow-none focus:ring-0"
+              className="mt-0.5 h-5! gap-1.5 border-none bg-transparent px-0 py-0! font-condensed text-xs font-bold uppercase tracking-[0.14em] tabular-nums text-muted-foreground shadow-none focus:ring-0"
             >
               <CalendarDays className="h-3.5 w-3.5" />
               <SelectValue
@@ -246,16 +207,20 @@ function SlotPicker({
           type="button"
           disabled={disabled}
           aria-label={ariaLabel}
-          className="flex w-full items-center gap-2.5 border border-dashed border-transparent bg-muted/20 p-2.5 text-left transition-colors hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="group relative flex w-full items-center gap-2.5 border border-dashed border-border bg-muted/10 p-2.5 text-left transition-colors hover:border-primary/60 hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          <span className="w-4 shrink-0 text-center font-mono text-[0.65rem] font-medium uppercase tracking-wider tabular-nums text-muted-foreground">
+          {/* Faint Fraunces seed watermark behind the empty slot. */}
+          <span
+            aria-hidden
+            className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 font-display text-3xl font-black leading-none tabular-nums text-foreground/[0.06]"
+          >
             {seed}
           </span>
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-dashed bg-muted/40">
-            <Plus className="h-4 w-4 opacity-60" />
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-sm border border-dashed border-border bg-muted/40 text-muted-foreground group-hover:border-primary/60 group-hover:text-primary">
+            <Plus className="h-4 w-4" />
           </span>
-          <span className="font-mono text-[0.65rem] uppercase tracking-wider text-muted-foreground">
-            Pick a player
+          <span className="font-condensed text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground group-hover:text-foreground">
+            Seed this slot
           </span>
         </button>
       }

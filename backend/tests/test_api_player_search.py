@@ -27,6 +27,16 @@ class PlayerSearchEndpointTest(unittest.TestCase):
         results = response.json()
         self.assertEqual(results[0]["full_name"], "Stephen Curry")
 
+    def test_accentless_query_matches_accented_name(self):
+        # A name typed without diacritics (e.g. from a deep-link) must still
+        # resolve to the static index's accented entry ("Nikola Jokić").
+        response = self.client.get("/api/players/search", params={"q": "Nikola Jokic"})
+
+        self.assertEqual(response.status_code, 200)
+        results = response.json()
+        self.assertTrue(results)
+        self.assertEqual(results[0]["full_name"], "Nikola Jokić")
+
     def test_caps_results_at_ten(self):
         response = self.client.get("/api/players/search", params={"q": "a"})
 
