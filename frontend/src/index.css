@@ -269,10 +269,10 @@
   }
   .rule-double {
     border: 0;
-    height: 4px;
+    height: 0;
+    margin: 0;
     border-top: 2px solid
       color-mix(in oklch, var(--foreground) 80%, transparent);
-    border-bottom: 1px solid var(--primary);
   }
 
   /* PAPER GRAIN — full-bleed fixed layer, mounted once in App root */

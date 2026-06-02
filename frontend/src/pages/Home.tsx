@@ -3,6 +3,7 @@ import { Activity, ArrowRight, ArrowUpRight, Swords, Trophy } from "lucide-react
 
 import { Button } from "@/components/ui/button"
 import { Kicker, Rule, StatFigure, HalftoneAvatar } from "@/components/editorial"
+import { useTheme } from "@/components/ui/theme-provider"
 import { peakSeason } from "@/lib/peakSeasons"
 
 const HEADSHOT = (id: number) =>
@@ -87,40 +88,34 @@ const STATS = [
   { value: "21", label: "Points to win", note: "win by two — playground rules" },
 ]
 
-function reveal(delay: number) {
-  return {
-    className:
-      "animate-in fade-in slide-in-from-bottom-3 duration-700 [animation-fill-mode:both]",
-    style: { animationDelay: `${delay}ms` },
-  }
-}
-
 const Home = () => {
+  const { theme } = useTheme()
+  const logoSrc =
+    theme === "dark" ? "/img/logo_white.svg" : "/img/logo_black.svg"
   return (
     <div className="mx-auto w-full max-w-screen-xl px-4 md:px-6">
       {/* ── THE COVER ──────────────────────────────────────────── */}
       <section className="relative grid grid-cols-1 items-center gap-x-12 gap-y-12 overflow-hidden py-14 lg:grid-cols-12 lg:py-24">
         {/* Atmosphere: a printed halftone tone bleeding from the top-right, and
-            an oversized "1-ON-1" watermark — names the format, fills the cover. */}
+            an oversized ghosted logo watermark filling the cover like a seal. */}
         <div
           aria-hidden
           className="halftone-splash pointer-events-none absolute inset-0 -z-10"
         />
-        <span
+        <img
+          src={logoSrc}
+          alt=""
           aria-hidden
-          className="pointer-events-none absolute -bottom-12 left-1/2 -z-10 hidden -translate-x-1/2 select-none font-display text-[12rem] font-black italic leading-none text-foreground/[0.045] lg:block xl:text-[14rem]"
-        >
-          1-ON-1
-        </span>
+          className="pointer-events-none absolute -bottom-20 left-1/2 -z-10 hidden w-[36rem] max-w-none -translate-x-1/2 select-none opacity-[0.03] lg:block xl:w-[44rem]"
+        />
 
         {/* Cover story */}
         <div className="relative z-10 flex flex-col items-start lg:col-span-6 lg:pr-6">
-          <div {...reveal(0)}>
+          <div>
             <Kicker ruled>Settle it on the hardwood</Kicker>
           </div>
 
           <h1
-            {...reveal(100)}
             className="display mt-6 text-[3.5rem] leading-[0.9] sm:text-[5rem] lg:text-[6.25rem]"
           >
             Who you
@@ -129,14 +124,13 @@ const Home = () => {
           </h1>
 
           <p
-            {...reveal(200)}
             className="mt-10 max-w-md text-pretty font-display text-xl italic leading-relaxed text-muted-foreground"
           >
             Pick any two legends, any era. Hooper runs their one-on-one a
             thousand times on real NBA tendencies — then hands you the verdict.
           </p>
 
-          <div {...reveal(300)} className="mt-6 flex flex-wrap items-center gap-3">
+          <div className="mt-6 flex flex-wrap items-center gap-3">
             <Button
               asChild
               size="lg"
@@ -161,7 +155,7 @@ const Home = () => {
             </Button>
           </div>
 
-          <div {...reveal(380)} className="mt-8 flex items-center gap-2">
+          <div className="mt-8 flex items-center gap-2">
             <Kicker tone="muted">
               1,000 sims · real NBA tendencies · first to 21
             </Kicker>
@@ -171,7 +165,7 @@ const Home = () => {
         {/* Cover-lines: the debates worth settling — pasted onto the page like
             a hand-placed sticker (opaque die-cut card, a slight tilt, a hard
             print-offset shadow, and a corner seal). Straightens on hover. */}
-        <div {...reveal(240)} className="relative z-10 lg:col-span-5">
+        <div className="relative z-10 lg:col-span-5">
           <div className="group/sticker relative -rotate-[1.5deg] rounded-sm border border-border bg-card p-5 shadow-[3px_4px_0_oklch(0_0_0/0.18)] transition-transform duration-300 ease-out hover:rotate-0 sm:p-6">
             {/* Die-cut corner seal */}
             <span
@@ -299,9 +293,32 @@ const Home = () => {
       <footer className="flex flex-col gap-3 border-t border-foreground/15 py-8 sm:flex-row sm:items-center sm:justify-between">
         <p className="max-w-lg text-sm leading-relaxed text-foreground/65">
           Every verdict is simulated from real per-possession NBA tendencies,
-          with each player frozen to the season you choose.
+          with each player frozen to the season you choose.{" "}
+          <Link
+            to="/how-it-works"
+            className="font-medium text-foreground underline decoration-border underline-offset-[5px] transition-colors hover:text-primary hover:decoration-primary"
+          >
+            See how it works
+          </Link>
         </p>
-        <Kicker tone="muted">Data · stats.nba.com</Kicker>
+        <div className="flex items-center gap-4">
+          <a
+            href="https://x.com/notmnp"
+            target="_blank"
+            rel="noreferrer noopener"
+            className="transition-colors hover:text-foreground"
+          >
+            <Kicker tone="muted">X</Kicker>
+          </a>
+          <a
+            href="https://github.com/notmnp"
+            target="_blank"
+            rel="noreferrer noopener"
+            className="transition-colors hover:text-foreground"
+          >
+            <Kicker tone="muted">GitHub</Kicker>
+          </a>
+        </div>
       </footer>
     </div>
   )

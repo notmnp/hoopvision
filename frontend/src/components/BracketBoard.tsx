@@ -104,7 +104,7 @@ export function BracketBoard({
       <ViewToggle view={view} onChange={setView} />
 
       {view === "round" ? (
-        <div className="animate-in fade-in duration-300 motion-reduce:animate-none">
+        <div>
           <RoundNavigator
             rounds={state.rounds}
             totalRounds={totalRounds}
@@ -128,7 +128,7 @@ export function BracketBoard({
       <div
         className={cn(
           view === "overview"
-            ? "animate-in fade-in duration-300 motion-reduce:animate-none"
+            ? ""
             : "pointer-events-none absolute -z-50 opacity-0"
         )}
         aria-hidden={view !== "overview"}
@@ -139,12 +139,9 @@ export function BracketBoard({
         <div ref={treeRef as React.RefObject<HTMLDivElement>} className="overflow-x-auto pb-4">
           <BracketTree
             rounds={state.rounds}
-            renderMatchup={(matchup, ctx) => (
+            renderMatchup={(matchup) => (
               <MatchupCard
                 matchup={matchup}
-                // Stagger the reveal so each round resolves a beat after the
-                // last; purely cosmetic CSS, disabled under reduced motion.
-                revealDelayMs={ctx.roundNumber * 90 + ctx.matchupIndex * 45}
                 onViewSeries={() => setActiveSeries(matchup)}
               />
             )}
@@ -355,8 +352,6 @@ function RoundGrid({
         <MatchupCard
           key={`${roundIndex}-${index}`}
           matchup={matchup}
-          // Gentle stagger as the round's cards drop in after a sim.
-          revealDelayMs={index * 60}
           onViewSeries={() => onViewSeries(matchup)}
         />
       ))}
@@ -366,7 +361,7 @@ function RoundGrid({
 
 function ChampionBanner({ champion }: { champion: BracketParticipant }) {
   return (
-    <div className="relative mb-6 overflow-hidden rounded-sm border border-gold/60 bg-card p-6 text-center animate-in fade-in zoom-in-95 duration-700 [animation-fill-mode:both] motion-reduce:animate-none sm:p-8">
+    <div className="relative mb-6 overflow-hidden rounded-sm border border-gold/60 bg-card p-6 text-center sm:p-8">
       {/* Printed gold halftone "ink tone" bleeding from the top-right and
           dissolving down — the same newspaper splash as the homepage cover.
           Gold is reserved for this champion moment. */}
@@ -399,7 +394,7 @@ function ChampionBanner({ champion }: { champion: BracketParticipant }) {
           {participantLabel(champion)}
         </h2>
         <p className="font-condensed text-xs font-bold uppercase tracking-[0.14em] tabular-nums text-muted-foreground">
-          {champion.season_id} · GOAT Bracket Champion
+          {champion.season_id} · Bracket Champion
         </p>
       </div>
     </div>
@@ -417,11 +412,9 @@ function initials(name: string) {
 
 function MatchupCard({
   matchup,
-  revealDelayMs = 0,
   onViewSeries,
 }: {
   matchup: BracketMatchup
-  revealDelayMs?: number
   onViewSeries: () => void
 }) {
   const decided = matchup.winner !== null
@@ -429,13 +422,7 @@ function MatchupCard({
   const bWon = decided && matchup.winner?.seed === matchup.seed_b
 
   return (
-    <div
-      // The reveal animation re-keys whenever the decided state flips, so a
-      // freshly simulated round visibly drops its cards in (CSS only).
-      key={decided ? "decided" : "open"}
-      className="rounded-sm border bg-card animate-in fade-in slide-in-from-bottom-2 duration-500 [animation-fill-mode:both] motion-reduce:animate-none"
-      style={{ animationDelay: `${revealDelayMs}ms` }}
-    >
+    <div className="rounded-sm border bg-card">
       <ParticipantRow
         participant={matchup.player_a}
         wins={matchup.series_wins.a}

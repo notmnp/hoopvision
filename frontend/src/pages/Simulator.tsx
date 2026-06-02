@@ -45,6 +45,7 @@ import {
 } from "@/components/ui/card"
 import { PlayerSearchCombobox } from "@/components/PlayerSearchCombobox"
 import { HalftoneAvatar, Kicker, Rule } from "@/components/editorial"
+import { HeaderBackdrop } from "@/components/HeaderBackdrop"
 import {
   Select,
   SelectContent,
@@ -452,7 +453,8 @@ function PlayerSelectionController() {
 
   return (
     <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-screen-xl flex-col px-4 py-8 md:px-6">
-      <div className="mb-6 flex flex-col gap-4 pb-6 duration-700 animate-in fade-in slide-in-from-bottom-4 [animation-fill-mode:both] md:flex-row md:items-end md:justify-between">
+      <div className="relative isolate mb-6 flex flex-col gap-4 pb-6 md:flex-row md:items-end md:justify-between">
+        <HeaderBackdrop figure="1-ON-1" />
         <div>
           <Kicker ruled>The ISO Lab</Kicker>
           <h1 className="mt-2 display text-5xl sm:text-6xl">Stage a Matchup</h1>
@@ -486,7 +488,7 @@ function PlayerSelectionController() {
       <Rule weight="double" className="mb-6" />
 
       {billing && (
-        <div className="mb-4 flex items-center justify-center gap-2 animate-in fade-in [animation-fill-mode:both]">
+        <div className="mb-4 flex items-center justify-center gap-2">
           <Sparkles className="h-3.5 w-3.5 text-primary" />
           <span className="kicker text-primary">{billing}</span>
         </div>
@@ -647,7 +649,7 @@ function PlayerSelectionController() {
               />
             </Button>
             {playByPlayOpen && (
-              <div className="mt-4 animate-in fade-in slide-in-from-bottom-2 [animation-fill-mode:both]">
+              <div className="mt-4">
                 <PlayByPlayView playByPlay={simulationResult.play_by_play} />
               </div>
             )}
@@ -2244,10 +2246,9 @@ function PossessionRow({ e, index }: { e: EnrichedPlay; index: number }) {
   return (
     <div
       className={cn(
-        "grid grid-cols-[1fr_auto_1fr] items-stretch animate-in fade-in slide-in-from-bottom-1 duration-300 [animation-fill-mode:both]",
+        "grid grid-cols-[1fr_auto_1fr] items-stretch",
         index > 0 && "border-t border-border/60"
       )}
-      style={{ animationDelay: `${Math.min(index * 18, 360)}ms` }}
     >
       <div
         className={cn(

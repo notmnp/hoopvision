@@ -2,6 +2,7 @@ import { AlertTriangle } from "lucide-react"
 import { Link } from "react-router-dom"
 
 import { Kicker, Rule, HalftoneAvatar } from "@/components/editorial"
+import { HeaderBackdrop } from "@/components/HeaderBackdrop"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -78,7 +79,8 @@ const Scoreboard = () => {
 
   return (
     <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-screen-xl flex-col px-4 py-8 md:px-6">
-      <header className="mb-6 flex flex-col gap-4 pb-6 duration-700 animate-in fade-in slide-in-from-bottom-4 [animation-fill-mode:both] md:flex-row md:items-end md:justify-between">
+      <header className="relative isolate mb-6 flex flex-col gap-4 pb-6 md:flex-row md:items-end md:justify-between">
+        <HeaderBackdrop figure="LIVE" />
         <div>
           <Kicker ruled>Live From Around the League</Kicker>
           <h1 className="mt-2 display text-5xl sm:text-6xl">Tonight's Slate</h1>
@@ -160,10 +162,7 @@ const Scoreboard = () => {
       {!loading && !error && games.length > 0 && (
         <div className="space-y-10">
           {grouped.map(({ band, games: bandGames }) => (
-            <section
-              key={band.bucket}
-              className="animate-in fade-in slide-in-from-bottom-2 duration-500 [animation-fill-mode:both]"
-            >
+            <section key={band.bucket}>
               <BandHeader band={band} count={bandGames.length} />
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 {bandGames.map((game) => (

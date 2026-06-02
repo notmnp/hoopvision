@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils"
 import { BracketBuilder } from "@/components/BracketBuilder"
 import { BracketBoard } from "@/components/BracketBoard"
 import { Kicker, Rule } from "@/components/editorial"
+import { HeaderBackdrop } from "@/components/HeaderBackdrop"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -422,7 +423,8 @@ export default function BracketWorkspace() {
     <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-screen-xl flex-col px-4 py-8 md:px-6">
       {running && bracketState ? (
         <>
-          <div className="mb-6 flex flex-col gap-4 pb-6 animate-in fade-in slide-in-from-bottom-4 duration-700 [animation-fill-mode:both] motion-reduce:animate-none md:flex-row md:items-end md:justify-between">
+          <div className="relative isolate mb-6 flex flex-col gap-4 pb-6 md:flex-row md:items-end md:justify-between">
+            <HeaderBackdrop figure="GOAT" />
             <div>
               <Kicker ruled>The Road to GOAT</Kicker>
               <h1 className="mt-2 display text-5xl sm:text-6xl">
@@ -508,7 +510,8 @@ export default function BracketWorkspace() {
         </>
       ) : (
         <>
-          <div className="mb-6 flex flex-col gap-4 pb-6 animate-in fade-in slide-in-from-bottom-4 duration-700 [animation-fill-mode:both] motion-reduce:animate-none md:flex-row md:items-end md:justify-between">
+          <div className="relative isolate mb-6 flex flex-col gap-4 pb-6 md:flex-row md:items-end md:justify-between">
+            <HeaderBackdrop figure="GOAT" />
             <div>
               <Kicker ruled>The Road to GOAT</Kicker>
               <h1 className="mt-2 display text-5xl sm:text-6xl">Build your Tournament</h1>

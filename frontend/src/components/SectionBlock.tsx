@@ -1,5 +1,6 @@
 import type { SectionDefinition } from "@/types/howItWorks"
 import { TechnicalPanel } from "@/components/TechnicalPanel"
+import { Rule } from "@/components/editorial"
 
 /**
  * SectionBlock — a single How It Works section. Renders an anchored heading,
@@ -8,14 +9,12 @@ import { TechnicalPanel } from "@/components/TechnicalPanel"
  */
 export function SectionBlock({ section }: { section: SectionDefinition }) {
   return (
-    <section className="scroll-mt-24">
-      <h2
-        id={section.id}
-        className="display text-2xl sm:text-3xl"
-      >
+    <section>
+      <h2 id={section.id} className="scroll-mt-24 display text-2xl sm:text-3xl">
         {section.title}
       </h2>
-      <p className="mt-3 max-w-prose text-base leading-relaxed text-foreground/85">
+      <Rule className="mt-3" />
+      <p className="mt-4 text-pretty text-[1.05rem] leading-relaxed text-foreground/85">
         {section.plainEnglish}
       </p>
       <TechnicalPanel technical={section.technical} />

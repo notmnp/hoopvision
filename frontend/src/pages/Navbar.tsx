@@ -16,8 +16,8 @@ import { useTheme } from "@/components/ui/theme-provider"
 import { cn } from "@/lib/utils"
 
 const NAV_ITEMS = [
-  { to: "/simulate", label: "ISO Lab" },
-  { to: "/bracket", label: "GOAT Bracket" },
+  { to: "/simulate", label: "Simulate a 1v1" },
+  { to: "/bracket", label: "Create a Bracket" },
   { to: "/live", label: "Live Scores" },
 ]
 

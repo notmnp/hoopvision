@@ -1,6 +1,7 @@
 import * as React from "react"
 import { BlockMath } from "react-katex"
 import type { TechnicalContent } from "@/types/howItWorks"
+import { Kicker } from "@/components/editorial"
 
 /**
  * SafeBlockMath — renders a single LaTeX equation, falling back to the raw
@@ -48,7 +49,10 @@ export function TechnicalPanel({ technical }: { technical: TechnicalContent }) {
   if (!hasContent) return null
 
   return (
-    <div className="mt-5 flex flex-col gap-5 rounded-sm border border-foreground/15 bg-muted/40 p-5">
+    <div className="mt-6 flex flex-col gap-5 rounded-sm border border-foreground/15 bg-newsprint p-5 sm:p-6">
+      <Kicker ruled tone="muted">
+        Under the Hood
+      </Kicker>
       {equations && equations.length > 0 && (
         <div className="flex flex-col gap-3 overflow-x-auto">
           {equations.map((eq, i) => (
@@ -101,7 +105,7 @@ export function TechnicalPanel({ technical }: { technical: TechnicalContent }) {
       )}
 
       {prose && (
-        <p className="max-w-prose text-sm leading-relaxed text-muted-foreground">
+        <p className="text-sm leading-relaxed text-muted-foreground">
           {prose}
         </p>
       )}
