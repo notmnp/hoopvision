@@ -6,10 +6,12 @@ import { TooltipProvider } from "./components/ui/tooltip.tsx"
 import { Analytics } from "@vercel/analytics/react"
 import './index.css'
 import Navbar from './pages/Navbar.tsx'
+import AppFooter from './components/AppFooter.tsx'
 import Home from './pages/Home.tsx'
 import Scoreboard from './pages/Scoreboard.tsx'
 import Simulator from './pages/Simulator.tsx'
 import BracketSetup from './pages/BracketSetup.tsx'
+import HowItWorksView from './pages/HowItWorksView.tsx'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -23,7 +25,9 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/live" element={<Scoreboard />} />
             <Route path="/simulate" element={<Simulator />} />
             <Route path="/bracket/:bracketId?" element={<BracketSetup />} />
+            <Route path="/how-it-works" element={<HowItWorksView />} />
           </Routes>
+          <AppFooter />
           <Analytics />
         </TooltipProvider>
       </ThemeProvider>
