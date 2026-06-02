@@ -13,8 +13,9 @@ import BracketSetup from './pages/BracketSetup.tsx'
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
-      <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
+      <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
         <TooltipProvider delayDuration={200}>
+          <div className="grain-layer" aria-hidden />
           <Navbar />
           <Routes>
             <Route path="/" element={<Home />} />

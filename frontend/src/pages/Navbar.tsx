@@ -16,10 +16,19 @@ import { useTheme } from "@/components/ui/theme-provider"
 import { cn } from "@/lib/utils"
 
 const NAV_ITEMS = [
-  { to: "/simulate", label: "IsoLab" },
+  { to: "/simulate", label: "ISO Lab" },
   { to: "/bracket", label: "GOAT Bracket" },
   { to: "/live", label: "Live Scores" },
 ]
+
+const navClass = ({ isActive }: { isActive: boolean }) =>
+  cn(
+    "font-display text-[0.9rem] font-medium leading-none transition-colors",
+    "underline-offset-[7px] decoration-1 hover:underline hover:decoration-border",
+    isActive
+      ? "text-primary underline decoration-primary hover:decoration-primary"
+      : "text-foreground/70 hover:text-foreground"
+  )
 
 export function Navbar() {
   const { theme } = useTheme()
@@ -29,30 +38,30 @@ export function Navbar() {
     theme === "dark" ? "/img/logo_white.svg" : "/img/logo_black.svg"
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="mx-auto flex h-16 w-full max-w-screen-xl items-center justify-between px-4 md:px-6">
-        <Link to="/" className="flex items-center" aria-label="IsoLab home">
-          <img src={logoSrc} alt="IsoLab" className="h-8 w-8" />
+    <header className="sticky top-0 z-50 w-full border-b-2 border-foreground/80 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/75">
+      <div className="mx-auto flex h-16 w-full max-w-screen-xl items-center justify-between gap-4 px-4 md:px-6">
+        <Link
+          to="/"
+          className="flex items-center gap-2.5"
+          aria-label="Hooper home"
+        >
+          <img src={logoSrc} alt="" className="h-7 w-7" />
+          <span className="flex flex-col leading-none">
+            <span className="masthead text-xl text-foreground">HOOPER</span>
+            <span className="kicker -mt-0.5 hidden text-muted-foreground sm:inline-flex">
+              The Matchup Issue
+            </span>
+          </span>
         </Link>
 
-        <nav className="hidden items-center gap-1 md:flex">
+        <nav className="hidden items-center gap-6 md:flex">
           {NAV_ITEMS.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                cn(
-                  "rounded-md px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-                  isActive && "text-amber-600 dark:text-amber-400"
-                )
-              }
-            >
+            <NavLink key={item.to} to={item.to} className={navClass}>
               {item.label}
             </NavLink>
           ))}
-          <div className="ml-2">
-            <ModeToggle />
-          </div>
+          <span className="ml-1 h-5 w-px bg-border" />
+          <ModeToggle />
         </nav>
 
         <div className="flex items-center gap-2 md:hidden">
@@ -65,23 +74,34 @@ export function Navbar() {
             </SheetTrigger>
             <SheetContent side="right" className="w-72">
               <SheetHeader>
-                <SheetTitle>
-                  <img src={logoSrc} alt="IsoLab" className="h-9 w-9" />
+                <SheetTitle className="flex items-center gap-2.5">
+                  <img src={logoSrc} alt="" className="h-8 w-8" />
+                  <span className="masthead text-xl">HOOPER</span>
                 </SheetTitle>
               </SheetHeader>
-              <nav className="mt-2 flex flex-col gap-1 px-2">
+              <nav className="mt-4 flex flex-col gap-1 px-4">
                 {NAV_ITEMS.map((item) => (
                   <SheetClose asChild key={item.to}>
                     <NavLink
                       to={item.to}
                       className={({ isActive }) =>
                         cn(
-                          "rounded-md px-3 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-                          isActive && "bg-accent text-amber-600 dark:text-amber-400"
+                          "flex items-center gap-3 border-b border-border py-3 font-display text-xl font-medium transition-colors hover:text-foreground",
+                          isActive ? "text-primary" : "text-foreground/80"
                         )
                       }
                     >
-                      {item.label}
+                      {({ isActive }) => (
+                        <>
+                          <span
+                            className={cn(
+                              "h-3.5 w-0.5",
+                              isActive ? "bg-primary" : "bg-transparent"
+                            )}
+                          />
+                          {item.label}
+                        </>
+                      )}
                     </NavLink>
                   </SheetClose>
                 ))}

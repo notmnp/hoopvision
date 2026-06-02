@@ -4,6 +4,7 @@ import axios from "axios"
 import {
   AlertTriangle,
   Download,
+  Eraser,
   FastForward,
   Loader2,
   PlayCircle,
@@ -19,6 +20,7 @@ import {
   BracketSize,
   BracketSlot,
   BracketState,
+  EMPTY_SLOT,
   SERIES_FORMATS,
   SeriesFormat,
   emptySlots,
@@ -28,6 +30,7 @@ import { exportBracketImage } from "@/lib/bracketExporter"
 import { cn } from "@/lib/utils"
 import { BracketBuilder } from "@/components/BracketBuilder"
 import { BracketBoard } from "@/components/BracketBoard"
+import { Kicker, Rule } from "@/components/editorial"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -36,6 +39,136 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+
+// Curated preset fields. Each entry is [player name, peak season] in seed order
+// (index 0 = seed 1). Names resolve through the same /players/search index the
+// combobox uses, and the season string is applied directly (no extra lookup),
+// so dropping a preset fills the whole field in one request per slot. Lists are
+// 16 deep; smaller bracket sizes take the top-N prefix, keeping seeds stable.
+interface FieldPreset {
+  id: string
+  label: string
+  blurb: string
+  players: [name: string, season: string][]
+}
+
+const FIELD_PRESETS: FieldPreset[] = [
+  {
+    id: "all-time",
+    label: "All-Time Top 16",
+    blurb: "The undisputed pantheon, peak seasons.",
+    players: [
+      ["Michael Jordan", "1995-96"],
+      ["LeBron James", "2012-13"],
+      ["Kareem Abdul-Jabbar", "1971-72"],
+      ["Magic Johnson", "1986-87"],
+      ["Bill Russell", "1964-65"],
+      ["Larry Bird", "1985-86"],
+      ["Wilt Chamberlain", "1966-67"],
+      ["Tim Duncan", "2002-03"],
+      ["Shaquille O'Neal", "1999-00"],
+      ["Kobe Bryant", "2005-06"],
+      ["Hakeem Olajuwon", "1993-94"],
+      ["Stephen Curry", "2015-16"],
+      ["Kevin Durant", "2013-14"],
+      ["Nikola Jokic", "2023-24"],
+      ["Giannis Antetokounmpo", "2019-20"],
+      ["Oscar Robertson", "1963-64"],
+    ],
+  },
+  {
+    id: "modern",
+    label: "Modern Era",
+    blurb: "The faces of the post-2010 league.",
+    players: [
+      ["LeBron James", "2017-18"],
+      ["Stephen Curry", "2015-16"],
+      ["Kevin Durant", "2013-14"],
+      ["Nikola Jokic", "2023-24"],
+      ["Giannis Antetokounmpo", "2019-20"],
+      ["Luka Doncic", "2023-24"],
+      ["Joel Embiid", "2022-23"],
+      ["James Harden", "2018-19"],
+      ["Kawhi Leonard", "2018-19"],
+      ["Russell Westbrook", "2016-17"],
+      ["Jayson Tatum", "2023-24"],
+      ["Shai Gilgeous-Alexander", "2023-24"],
+      ["Damian Lillard", "2022-23"],
+      ["Anthony Davis", "2019-20"],
+      ["Devin Booker", "2022-23"],
+      ["Jimmy Butler", "2022-23"],
+    ],
+  },
+  {
+    id: "80s90s",
+    label: "80s / 90s Legends",
+    blurb: "Hardwood Classics, throwback uniforms.",
+    players: [
+      ["Michael Jordan", "1995-96"],
+      ["Magic Johnson", "1986-87"],
+      ["Larry Bird", "1985-86"],
+      ["Hakeem Olajuwon", "1993-94"],
+      ["Karl Malone", "1996-97"],
+      ["Charles Barkley", "1992-93"],
+      ["David Robinson", "1994-95"],
+      ["Patrick Ewing", "1989-90"],
+      ["Isiah Thomas", "1988-89"],
+      ["Scottie Pippen", "1993-94"],
+      ["John Stockton", "1989-90"],
+      ["Clyde Drexler", "1991-92"],
+      ["Dominique Wilkins", "1987-88"],
+      ["Gary Payton", "1995-96"],
+      ["Reggie Miller", "1993-94"],
+      ["Kevin Garnett", "2003-04"],
+    ],
+  },
+  {
+    id: "guards",
+    label: "Guards Only",
+    blurb: "Backcourt assassins, no bigs allowed.",
+    players: [
+      ["Michael Jordan", "1995-96"],
+      ["Stephen Curry", "2015-16"],
+      ["Magic Johnson", "1986-87"],
+      ["Kobe Bryant", "2005-06"],
+      ["Luka Doncic", "2023-24"],
+      ["James Harden", "2018-19"],
+      ["Allen Iverson", "2000-01"],
+      ["Russell Westbrook", "2016-17"],
+      ["Dwyane Wade", "2008-09"],
+      ["Damian Lillard", "2022-23"],
+      ["Shai Gilgeous-Alexander", "2023-24"],
+      ["Jerry West", "1969-70"],
+      ["Oscar Robertson", "1963-64"],
+      ["John Stockton", "1989-90"],
+      ["Isiah Thomas", "1988-89"],
+      ["Gary Payton", "1995-96"],
+    ],
+  },
+  {
+    id: "bigs",
+    label: "Bigs Only",
+    blurb: "Paint enforcers and skilled centers.",
+    players: [
+      ["Kareem Abdul-Jabbar", "1971-72"],
+      ["Wilt Chamberlain", "1966-67"],
+      ["Shaquille O'Neal", "1999-00"],
+      ["Tim Duncan", "2002-03"],
+      ["Hakeem Olajuwon", "1993-94"],
+      ["Nikola Jokic", "2023-24"],
+      ["Bill Russell", "1964-65"],
+      ["Giannis Antetokounmpo", "2019-20"],
+      ["David Robinson", "1994-95"],
+      ["Kevin Garnett", "2003-04"],
+      ["Joel Embiid", "2022-23"],
+      ["Patrick Ewing", "1989-90"],
+      ["Anthony Davis", "2019-20"],
+      ["Karl Malone", "1996-97"],
+      ["Dirk Nowitzki", "2006-07"],
+      ["Moses Malone", "1982-83"],
+    ],
+  },
+]
 
 // The GOAT Bracket workspace. A bracket is one object with a lifecycle
 // (SETUP → IN_PROGRESS → COMPLETE), so a single page owns it across both
@@ -59,6 +192,7 @@ export default function BracketWorkspace() {
   const [submitting, setSubmitting] = useState(false)
   const [simulating, setSimulating] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [loadingPreset, setLoadingPreset] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const treeRef = useRef<HTMLDivElement>(null)
 
@@ -124,9 +258,63 @@ export default function BracketWorkspace() {
     }
   }
 
+  // Drop a curated preset field into the slots. Each name is resolved to a
+  // player_id through the same search index the combobox uses, then paired with
+  // the preset's peak-season string directly — no per-slot season lookup, so a
+  // full 16-player field lands fast. Any name that fails to resolve is left
+  // empty (and surfaced), so a single miss doesn't blow away the whole drop.
+  async function loadPreset(preset: FieldPreset) {
+    setLoadingPreset(preset.id)
+    setError(null)
+    try {
+      const picks = preset.players.slice(0, size)
+      const resolved = await Promise.all(
+        picks.map(async ([name, season_id]) => {
+          try {
+            const response = await axios.get<{ id: number; full_name: string }[]>(
+              `${API_BASE_URL}/players/search`,
+              { params: { q: name } }
+            )
+            const match = response.data[0]
+            if (!match) return { ...EMPTY_SLOT }
+            return {
+              player_id: match.id,
+              name: match.full_name,
+              season_id,
+            } satisfies BracketSlot
+          } catch {
+            return { ...EMPTY_SLOT }
+          }
+        })
+      )
+      setSlots(() => {
+        const next = emptySlots(size)
+        resolved.forEach((slot, index) => {
+          next[index] = slot
+        })
+        return next
+      })
+      const missing = resolved.filter((slot) => slot.player_id === null).length
+      if (missing > 0) {
+        setError(
+          `Loaded the ${preset.label} field, but ${missing} ` +
+            `${missing === 1 ? "seat" : "seats"} couldn't be resolved — seed ` +
+            `${missing === 1 ? "it" : "them"} by hand.`
+        )
+      }
+    } finally {
+      setLoadingPreset(null)
+    }
+  }
+
+  function clearField() {
+    setSlots(emptySlots(size))
+    setError(null)
+  }
+
   const filledCount = slots.filter(isSlotReady).length
   const allFilled = filledCount === size
-  const busy = loadingDefault || submitting
+  const busy = loadingDefault || submitting || loadingPreset !== null
 
   async function simulate() {
     if (!allFilled) return
@@ -200,9 +388,7 @@ export default function BracketWorkspace() {
     return (
       <CenteredMessage>
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-          Loading bracket…
-        </p>
+        <p className="kicker text-muted-foreground">Loading bracket…</p>
       </CenteredMessage>
     )
   }
@@ -216,7 +402,7 @@ export default function BracketWorkspace() {
           variant="outline"
           size="sm"
           onClick={startNew}
-          className="font-mono uppercase tracking-wider"
+          className="font-condensed uppercase tracking-[0.14em]"
         >
           <Plus className="h-4 w-4" />
           Start a new bracket
@@ -251,181 +437,352 @@ export default function BracketWorkspace() {
         className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[320px] bg-[radial-gradient(circle,_oklch(0.6_0_0_/_0.12)_1px,_transparent_1px)] [background-size:26px_26px] [mask-image:linear-gradient(to_bottom,black,transparent_70%)]"
       />
 
-      <div className="mb-6 flex flex-col gap-4 border-b pb-6 md:flex-row md:items-end md:justify-between">
-        <div className="flex flex-col items-start gap-2 animate-in fade-in slide-in-from-bottom-4 duration-700 [animation-fill-mode:both] motion-reduce:animate-none">
-          {running && bracketState ? (
-            <>
-              <div className="flex items-center gap-2 font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                <span>GOAT Bracket</span>
-                <span className="text-amber-500/60">◆</span>
-                <span className="tabular-nums">
-                  {bracketState.bracket_size}-player · Bo
-                  {bracketState.series_format}
+      {running && bracketState ? (
+        <>
+          <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div className="flex flex-col items-start gap-2 animate-in fade-in slide-in-from-bottom-4 duration-700 [animation-fill-mode:both] motion-reduce:animate-none">
+              <Kicker ruled>The Road to GOAT</Kicker>
+              <h1 className="display text-5xl sm:text-6xl">
+                {complete ? "Champion Crowned" : "The Bracket"}
+              </h1>
+              <div className="flex flex-wrap items-center gap-2.5">
+                <span className="font-condensed text-[0.78rem] font-bold uppercase tracking-[0.14em] tabular-nums text-muted-foreground">
+                  {bracketState.bracket_size}-player · Bo{bracketState.series_format}
                 </span>
+                <StatusBadge status={bracketState.status} />
               </div>
-              <h1 className="font-display text-3xl font-black uppercase tracking-tight sm:text-4xl">
-                {complete ? "Champion crowned" : "Tournament bracket"}
-              </h1>
-              <StatusBadge status={bracketState.status} />
-            </>
-          ) : (
-            <>
-              <span className="font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                GOAT Bracket
-              </span>
-              <h1 className="font-display text-3xl font-black uppercase tracking-tight sm:text-4xl">
-                Build your tournament
-              </h1>
-              <p className="max-w-md text-pretty text-sm leading-relaxed text-muted-foreground">
-                Fill every slot in the bracket, then run each matchup as a
-                best-of series through the IsoLab engine until one champion
-                remains.
-              </p>
-            </>
-          )}
-        </div>
+            </div>
 
-        {running ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="outline"
-              onClick={startNew}
-              className="font-mono uppercase tracking-wider"
-            >
-              <Plus className="h-4 w-4" />
-              New bracket
-            </Button>
-            <Button
-              onClick={() => runStep("run-round")}
-              disabled={complete || simulating}
-              className="font-mono uppercase tracking-wider"
-            >
-              {simulating ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <PlayCircle className="h-4 w-4" />
-              )}
-              Simulate Round
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => runStep("run-all")}
-              disabled={complete || simulating}
-              className="font-mono uppercase tracking-wider"
-            >
-              {simulating ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <FastForward className="h-4 w-4" />
-              )}
-              Simulate All
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handleExport}
-              disabled={exporting}
-              className="font-mono uppercase tracking-wider"
-            >
-              {exporting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Download className="h-4 w-4" />
-              )}
-              Export Bracket
-            </Button>
-          </div>
-        ) : (
-          <div className="flex flex-col items-stretch gap-3 sm:items-end">
-            <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-end">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
-                variant="secondary"
-                onClick={loadPreconfigured}
-                disabled={busy}
-                className="font-mono uppercase tracking-wider sm:w-auto"
+                variant="outline"
+                onClick={startNew}
+                className="font-condensed uppercase tracking-[0.14em]"
               >
-                {loadingDefault ? (
+                <Plus className="h-4 w-4" />
+                New bracket
+              </Button>
+              <Button
+                onClick={() => runStep("run-round")}
+                disabled={complete || simulating}
+                className="font-condensed uppercase tracking-[0.14em]"
+              >
+                {simulating ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <Sparkles className="h-4 w-4" />
+                  <PlayCircle className="h-4 w-4" />
                 )}
-                Autofill Players
+                Simulate Round
               </Button>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  {/* Wrapped in a span so the tooltip still fires while the
-                      button is disabled (disabled controls emit no hover). */}
-                  <span className="flex w-full sm:w-auto">
-                    <Button
-                      onClick={simulate}
-                      disabled={!allFilled || busy}
-                      className="w-full font-mono uppercase tracking-wider sm:w-auto"
-                    >
-                      {submitting ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Swords className="h-4 w-4" />
-                      )}
-                      Simulate
-                    </Button>
-                  </span>
-                </TooltipTrigger>
-                {!allFilled && (
-                  <TooltipContent className="font-mono text-xs uppercase tracking-wider">
-                    <span className="tabular-nums">{size - filledCount}</span> more{" "}
-                    {size - filledCount === 1 ? "player" : "players"} to set
-                    before you can simulate.
-                  </TooltipContent>
+              <Button
+                variant="outline"
+                onClick={() => runStep("run-all")}
+                disabled={complete || simulating}
+                className="font-condensed uppercase tracking-[0.14em]"
+              >
+                {simulating ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <FastForward className="h-4 w-4" />
                 )}
-              </Tooltip>
+                Simulate All
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleExport}
+                disabled={exporting}
+                title="Download a poster of your champion"
+                className="font-condensed uppercase tracking-[0.14em]"
+              >
+                {exporting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+                Print the Cover
+              </Button>
             </div>
           </div>
-        )}
-      </div>
+          <Rule weight="double" className="mb-6" />
 
-      {error && (
-        <Alert variant="destructive" className="mb-5">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertTitle className="font-mono uppercase tracking-wider">
-            {running ? "Simulation failed" : "Couldn't continue"}
-          </AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+          {error && (
+            <Alert variant="destructive" className="mb-5">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle className="font-condensed uppercase tracking-[0.14em]">
+                Simulation failed
+              </AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
 
-      {running && bracketState ? (
-        <BracketBoard state={bracketState} treeRef={treeRef} />
+          <BracketBoard state={bracketState} treeRef={treeRef} />
+        </>
       ) : (
         <>
-          <BracketBuilder
-            size={size}
-            slots={slots}
-            onUpdateSlot={updateSlot}
-            disabled={busy}
-          />
-          <div className="mt-6 flex flex-wrap items-end gap-6 border-t pt-6">
-            <SegmentedControl
-              label="Bracket size"
-              options={BRACKET_SIZES.map((value) => ({
-                value,
-                label: `${value}`,
-              }))}
-              value={size}
-              onChange={(value) => changeSize(value as BracketSize)}
-              disabled={busy}
-            />
-            <SegmentedControl
-              label="Series format"
-              options={SERIES_FORMATS.map((value) => ({
-                value,
-                label: `Bo${value}`,
-              }))}
-              value={seriesFormat}
-              onChange={(value) => setSeriesFormat(value as SeriesFormat)}
-              disabled={busy}
-            />
+          <div className="mb-4 flex flex-col items-start gap-2 animate-in fade-in slide-in-from-bottom-4 duration-700 [animation-fill-mode:both] motion-reduce:animate-none">
+            <Kicker ruled>The Road to GOAT</Kicker>
+            <h1 className="display text-5xl sm:text-6xl">Draft the Field</h1>
+            <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 font-condensed text-[0.78rem] font-bold uppercase tracking-[0.14em] text-muted-foreground">
+              <span>Drop a field</span>
+              <span aria-hidden>·</span>
+              <span>Tune the matchups</span>
+              <span aria-hidden>·</span>
+              <span>Settle it on the floor</span>
+            </p>
+          </div>
+          <Rule weight="double" className="mb-6" />
+
+          {error && (
+            <Alert variant="destructive" className="mb-5">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle className="font-condensed uppercase tracking-[0.14em]">
+                Heads up
+              </AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
+            {/* The Field Office: a sticky command rail for fast field-building,
+                format selection, live readiness, and the Tip Off CTA. */}
+            <aside className="w-full shrink-0 lg:sticky lg:top-6 lg:w-72">
+              <FieldOffice
+                size={size}
+                seriesFormat={seriesFormat}
+                filledCount={filledCount}
+                allFilled={allFilled}
+                busy={busy}
+                submitting={submitting}
+                loadingDefault={loadingDefault}
+                loadingPreset={loadingPreset}
+                onChangeSize={(value) => changeSize(value)}
+                onChangeFormat={(value) => setSeriesFormat(value)}
+                onAutofill={loadPreconfigured}
+                onLoadPreset={loadPreset}
+                onClear={clearField}
+                onTipOff={simulate}
+              />
+            </aside>
+
+            <div className="min-w-0 flex-1">
+              <BracketBuilder
+                size={size}
+                slots={slots}
+                onUpdateSlot={updateSlot}
+                disabled={busy}
+              />
+            </div>
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+// The setup-phase command rail. Keeps every field-building affordance in one
+// readable column: instant preset fields + autofill, the size/format dials, a
+// live "X / N seeded" readout, and the gated Tip Off CTA that spells out
+// exactly what's missing.
+function FieldOffice({
+  size,
+  seriesFormat,
+  filledCount,
+  allFilled,
+  busy,
+  submitting,
+  loadingDefault,
+  loadingPreset,
+  onChangeSize,
+  onChangeFormat,
+  onAutofill,
+  onLoadPreset,
+  onClear,
+  onTipOff,
+}: {
+  size: BracketSize
+  seriesFormat: SeriesFormat
+  filledCount: number
+  allFilled: boolean
+  busy: boolean
+  submitting: boolean
+  loadingDefault: boolean
+  loadingPreset: string | null
+  onChangeSize: (size: BracketSize) => void
+  onChangeFormat: (format: SeriesFormat) => void
+  onAutofill: () => void
+  onLoadPreset: (preset: FieldPreset) => void
+  onClear: () => void
+  onTipOff: () => void
+}) {
+  const remaining = size - filledCount
+  const progress = size ? filledCount / size : 0
+  const hasAny = filledCount > 0
+
+  return (
+    <div className="flex flex-col gap-6 rounded-sm border bg-card p-5">
+      {/* Readiness meter */}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-baseline justify-between">
+          <Kicker tone="muted">The Field</Kicker>
+          <span className="font-display text-sm font-black uppercase tabular-nums">
+            <span className={allFilled ? "text-primary" : "text-foreground"}>
+              {filledCount}
+            </span>
+            <span className="text-muted-foreground"> / {size} seeded</span>
+          </span>
+        </div>
+        <div
+          className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={size}
+          aria-valuenow={filledCount}
+        >
+          <div
+            className={cn(
+              "h-full rounded-full transition-[width] duration-500 ease-out motion-reduce:transition-none",
+              allFilled ? "bg-primary" : "bg-foreground/40"
+            )}
+            style={{ width: `${progress * 100}%` }}
+          />
+        </div>
+        <p className="font-sans text-xs leading-snug text-muted-foreground">
+          {allFilled ? (
+            <span className="font-semibold text-primary">
+              Field set — ready to tip off.
+            </span>
+          ) : (
+            <>
+              <span className="tabular-nums font-semibold text-foreground">
+                {remaining}
+              </span>{" "}
+              {remaining === 1 ? "seat" : "seats"} still open.
+            </>
+          )}
+        </p>
+      </div>
+
+      {/* Instant fields */}
+      <div className="flex flex-col gap-2.5">
+        <Kicker tone="muted">Drop a Field</Kicker>
+        <Button
+          onClick={onAutofill}
+          disabled={busy}
+          className="w-full justify-start font-condensed uppercase tracking-[0.14em]"
+        >
+          {loadingDefault ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Sparkles className="h-4 w-4" />
+          )}
+          Autofill the Legends
+        </Button>
+        <div className="flex flex-col gap-1.5">
+          {FIELD_PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              onClick={() => onLoadPreset(preset)}
+              disabled={busy}
+              className={cn(
+                "group flex flex-col items-start gap-0.5 rounded-sm border border-border bg-background px-3 py-2 text-left transition-colors",
+                "hover:border-primary hover:bg-primary/5",
+                "disabled:cursor-not-allowed disabled:opacity-50"
+              )}
+            >
+              <span className="flex w-full items-center justify-between gap-2">
+                <span className="font-display text-sm font-bold uppercase leading-none tracking-tight">
+                  {preset.label}
+                </span>
+                {loadingPreset === preset.id ? (
+                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
+                ) : (
+                  <span className="font-display text-sm font-black tabular-nums text-muted-foreground group-hover:text-primary">
+                    →
+                  </span>
+                )}
+              </span>
+              <span className="font-sans text-xs leading-snug text-muted-foreground">
+                {preset.blurb}
+              </span>
+            </button>
+          ))}
+        </div>
+        {hasAny && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onClear}
+            disabled={busy}
+            className="h-7 justify-start px-2 font-condensed text-xs uppercase tracking-[0.14em] text-muted-foreground hover:text-destructive"
+          >
+            <Eraser className="h-3.5 w-3.5" />
+            Clear the field
+          </Button>
+        )}
+      </div>
+
+      <Rule />
+
+      {/* Dials */}
+      <div className="flex flex-wrap items-end gap-x-8 gap-y-5">
+        <SegmentedControl
+          label="Field size"
+          options={BRACKET_SIZES.map((value) => ({ value, label: `${value}` }))}
+          value={size}
+          onChange={(value) => onChangeSize(value as BracketSize)}
+          disabled={busy}
+        />
+        <SegmentedControl
+          label="Series format"
+          options={SERIES_FORMATS.map((value) => ({
+            value,
+            label: `Bo${value}`,
+          }))}
+          value={seriesFormat}
+          onChange={(value) => onChangeFormat(value as SeriesFormat)}
+          disabled={busy}
+        />
+      </div>
+
+      <Rule />
+
+      {/* Tip Off */}
+      <div className="flex flex-col gap-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            {/* Wrapped in a span so the tooltip still fires while the button is
+                disabled (disabled controls emit no hover). */}
+            <span className="flex w-full">
+              <Button
+                size="lg"
+                onClick={onTipOff}
+                disabled={!allFilled || busy}
+                className="w-full font-condensed text-base uppercase tracking-[0.14em]"
+              >
+                {submitting ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <Swords className="h-5 w-5" />
+                )}
+                Tip Off →
+              </Button>
+            </span>
+          </TooltipTrigger>
+          {!allFilled && (
+            <TooltipContent className="font-condensed text-xs font-bold uppercase tracking-[0.14em]">
+              Seed all <span className="tabular-nums">{size}</span> to tip off —{" "}
+              <span className="tabular-nums">{remaining}</span>{" "}
+              {remaining === 1 ? "seat" : "seats"} left.
+            </TooltipContent>
+          )}
+        </Tooltip>
+        {!allFilled && (
+          <p className="text-center font-sans text-xs leading-snug text-muted-foreground">
+            Fill every seat to start the tournament.
+          </p>
+        )}
+      </div>
     </div>
   )
 }
@@ -444,11 +801,9 @@ function SegmentedControl({
   disabled?: boolean
 }) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-        {label}
-      </span>
-      <div className="inline-flex rounded-md border bg-muted/40 p-0.5">
+    <div className="flex flex-col gap-2">
+      <span className="kicker text-muted-foreground">{label}</span>
+      <div className="inline-flex items-end gap-1 border-b border-border">
         {options.map((option) => {
           const active = option.value === value
           return (
@@ -459,11 +814,11 @@ function SegmentedControl({
               aria-pressed={active}
               onClick={() => onChange(option.value)}
               className={cn(
-                "min-w-[3rem] rounded-[5px] px-3 py-1.5 font-mono text-sm font-medium uppercase tracking-wider tabular-nums transition-colors",
+                "min-w-[3rem] -mb-px border-b-2 px-3 pb-1.5 pt-1 font-display text-xl font-black uppercase tabular-nums transition-colors",
                 "disabled:cursor-not-allowed disabled:opacity-50",
                 active
-                  ? "border border-amber-500/40 bg-amber-500/10 text-amber-600 shadow-sm shadow-amber-500/10 dark:text-amber-400"
-                  : "border border-transparent text-muted-foreground hover:text-foreground"
+                  ? "border-primary text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
               )}
             >
               {option.label}
@@ -486,12 +841,11 @@ function StatusBadge({ status }: { status: BracketState["status"] }) {
     <Badge
       variant={complete ? "default" : "secondary"}
       className={cn(
-        "font-mono text-[0.65rem] uppercase tracking-wider",
-        complete &&
-          "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+        "font-condensed text-xs font-bold uppercase tracking-[0.14em]",
+        complete && "border-gold/50 bg-gold/15 text-foreground"
       )}
     >
-      {complete && <span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-amber-500" />}
+      {complete && <span className="mr-1.5 h-1.5 w-1.5 bg-gold" />}
       {label}
     </Badge>
   )

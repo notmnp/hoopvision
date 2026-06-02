@@ -111,16 +111,16 @@ export function PlayerSearchCombobox({
           />
           <CommandList className="max-h-60 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {searchLoading || (suggestionsLoading && suggestions.length === 0) ? (
-              <div className="flex items-center justify-center gap-2 py-6 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+              <div className="flex items-center justify-center gap-2 py-6 font-condensed text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 {searchLoading ? "Loading player…" : "Searching…"}
               </div>
             ) : !trimmed ? (
-              <div className="py-6 text-center font-mono text-xs uppercase tracking-wider text-muted-foreground">
+              <div className="py-6 text-center font-condensed text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground">
                 Type a player's name to search
               </div>
             ) : suggestions.length === 0 ? (
-              <div className="py-6 text-center font-mono text-xs uppercase tracking-wider text-muted-foreground">
+              <div className="py-6 text-center font-condensed text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground">
                 No players found
               </div>
             ) : (
@@ -130,14 +130,14 @@ export function PlayerSearchCombobox({
                     key={suggestion.id}
                     value={`${suggestion.full_name}__${suggestion.id}`}
                     onSelect={() => handleSelect(suggestion)}
-                    className="gap-3 data-[selected=true]:bg-amber-500/10 data-[selected=true]:text-amber-600 dark:data-[selected=true]:text-amber-400"
+                    className="gap-3 data-[selected=true]:bg-primary/10 data-[selected=true]:text-primary"
                   >
-                    <Avatar className="size-8 shrink-0 rounded-lg ring-1 ring-border">
+                    <Avatar className="size-8 shrink-0 rounded-sm ring-1 ring-border">
                       <AvatarImage
                         src={HEADSHOT(suggestion.id)}
                         className="object-cover object-top"
                       />
-                      <AvatarFallback className="rounded-lg font-mono text-[0.6rem] font-medium">
+                      <AvatarFallback className="rounded-sm font-condensed text-[0.6rem] font-bold uppercase">
                         {initialsOf(suggestion.full_name)}
                       </AvatarFallback>
                     </Avatar>

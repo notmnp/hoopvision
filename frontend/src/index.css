@@ -1,17 +1,19 @@
-@import url("https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,600;0,700;0,800;0,900;1,800;1,900&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,400..700;1,400..600&family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&display=swap");
 @import "tailwindcss";
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --font-display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
-  --animate-marquee: marquee 60s linear infinite;
+  --radius-sm: calc(var(--radius) - 1px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 6px);
+  --font-display: "Fraunces", "Georgia", "Times New Roman", serif;
+  --font-sans: "Archivo", "Helvetica Neue", system-ui, sans-serif;
+  --font-condensed: "Archivo", "Arial Narrow", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", monospace;
+  --animate-marquee: marquee 75s linear infinite;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -30,6 +32,11 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-ink-blue: var(--ink-blue);
+  --color-court: var(--court);
+  --color-court-foreground: var(--court-foreground);
+  --color-newsprint: var(--newsprint);
+  --color-gold: var(--gold);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -45,73 +52,118 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/* ============================================================
+   HOOPER — "The Matchup Issue"
+   Light = Paper (cream, default) · Dark = Ink (warm near-black)
+   One accent: editorial Vermillion.
+   ============================================================ */
+
 :root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --radius: 0.25rem;
+
+  /* Surfaces — warm cream paper */
+  --background: oklch(0.971 0.012 85);
+  --foreground: oklch(0.215 0.018 55);
+  --card: oklch(0.988 0.009 85);
+  --card-foreground: oklch(0.215 0.018 55);
+  --popover: oklch(0.988 0.009 85);
+  --popover-foreground: oklch(0.215 0.018 55);
+
+  /* Primary = Vermillion (darkened for legible small text + AA button text) */
+  --primary: oklch(0.5 0.2 33);
+  --primary-foreground: oklch(0.985 0.008 85);
+
+  /* Newsprint-tan neutrals */
+  --secondary: oklch(0.935 0.018 80);
+  --secondary-foreground: oklch(0.265 0.02 55);
+  --muted: oklch(0.935 0.016 80);
+  --muted-foreground: oklch(0.435 0.022 60);
+  --accent: oklch(0.928 0.03 70);
+  --accent-foreground: oklch(0.265 0.02 55);
+
+  --destructive: oklch(0.535 0.215 28);
+
+  --border: oklch(0.25 0.018 55 / 0.22);
+  --input: oklch(0.25 0.018 55 / 0.3);
+  --ring: oklch(0.5 0.2 33);
+
+  /* Editorial supporting tones */
+  --ink-blue: oklch(0.38 0.09 245);
+  --court: oklch(0.485 0.13 150);
+  --court-foreground: oklch(0.985 0.008 85);
+  --newsprint: oklch(0.905 0.022 78);
+  --gold: oklch(0.76 0.13 80);
+
+  --chart-1: oklch(0.5 0.2 33);
+  --chart-2: oklch(0.38 0.09 245);
+  --chart-3: oklch(0.56 0.13 150);
+  --chart-4: oklch(0.76 0.13 80);
+  --chart-5: oklch(0.48 0.022 60);
+
+  --sidebar: oklch(0.96 0.014 84);
+  --sidebar-foreground: oklch(0.215 0.018 55);
+  --sidebar-primary: oklch(0.5 0.2 33);
+  --sidebar-primary-foreground: oklch(0.985 0.008 85);
+  --sidebar-accent: oklch(0.928 0.03 70);
+  --sidebar-accent-foreground: oklch(0.265 0.02 55);
+  --sidebar-border: oklch(0.25 0.018 55 / 0.16);
+  --sidebar-ring: oklch(0.5 0.2 33);
+
+  --grain-opacity: 0.04;
+  --halftone-color: oklch(0.215 0.018 55 / 0.1);
+  --splash-dot: oklch(0.215 0.018 55 / 0.13);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  /* Surfaces — "Night Edition": deep near-neutral charcoal (low chroma so it
+     reads as crisp ink, not muddy brown), bright cream type, vivid vermillion. */
+  --background: oklch(0.155 0.005 65);
+  --foreground: oklch(0.96 0.008 85);
+  --card: oklch(0.205 0.006 65);
+  --card-foreground: oklch(0.96 0.008 85);
+  --popover: oklch(0.205 0.006 65);
+  --popover-foreground: oklch(0.96 0.008 85);
+
+  --primary: oklch(0.73 0.165 40);
+  --primary-foreground: oklch(0.16 0.01 60);
+
+  --secondary: oklch(0.265 0.007 65);
+  --secondary-foreground: oklch(0.96 0.008 85);
+  --muted: oklch(0.265 0.007 65);
+  --muted-foreground: oklch(0.785 0.012 80);
+  --accent: oklch(0.305 0.01 60);
+  --accent-foreground: oklch(0.96 0.008 85);
+
+  --destructive: oklch(0.66 0.2 27);
+
+  --border: oklch(0.95 0.01 85 / 0.16);
+  --input: oklch(0.95 0.01 85 / 0.24);
+  --ring: oklch(0.73 0.165 40);
+
+  --ink-blue: oklch(0.68 0.12 245);
+  --court: oklch(0.72 0.15 152);
+  --court-foreground: oklch(0.16 0.01 60);
+  --newsprint: oklch(0.245 0.007 65);
+  --gold: oklch(0.82 0.13 82);
+
+  --chart-1: oklch(0.73 0.165 40);
+  --chart-2: oklch(0.68 0.12 245);
+  --chart-3: oklch(0.72 0.15 152);
+  --chart-4: oklch(0.82 0.13 82);
+  --chart-5: oklch(0.785 0.012 80);
+
+  --sidebar: oklch(0.185 0.006 65);
+  --sidebar-foreground: oklch(0.96 0.008 85);
+  --sidebar-primary: oklch(0.73 0.165 40);
+  --sidebar-primary-foreground: oklch(0.16 0.01 60);
+  --sidebar-accent: oklch(0.305 0.01 60);
+  --sidebar-accent-foreground: oklch(0.96 0.008 85);
+  --sidebar-border: oklch(0.95 0.01 85 / 0.16);
+  --sidebar-ring: oklch(0.73 0.165 40);
+
+  --grain-opacity: 0.022;
+  --halftone-color: oklch(0.95 0.01 85 / 0.08);
+  --splash-dot: oklch(0.95 0.01 85 / 0.1);
 }
 
 @layer base {
@@ -119,11 +171,22 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: "ss01";
+  }
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+  }
+  /* Big numerals everywhere align as a column */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
   }
 }
 
-/* Marquee ticker for the legendary-matchups strip on the homepage */
+/* ---- Marquee ticker (homepage rivalry wire) ---- */
 @keyframes marquee {
   from {
     transform: translateX(0);
@@ -134,6 +197,13 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
   .marquee-track {
     animation: none !important;
   }
@@ -142,11 +212,177 @@
   }
 }
 
-/* Hide the scrollbar while keeping the element scrollable. */
+@media (prefers-contrast: more) {
+  :root {
+    --border: oklch(0.25 0.018 55 / 0.4);
+  }
+  .dark {
+    --border: oklch(0.945 0.012 85 / 0.35);
+  }
+}
+
+/* ============================================================
+   Editorial utilities & components
+   ============================================================ */
+
 @utility scrollbar-hide {
   -ms-overflow-style: none;
   scrollbar-width: none;
   &::-webkit-scrollbar {
     display: none;
+  }
+}
+
+@layer components {
+  /* KICKER — small-caps editorial eyebrow, replaces uppercase-mono */
+  .kicker {
+    font-family: var(--font-condensed);
+    font-weight: 700;
+    font-size: 0.75rem;
+    line-height: 1.1;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-feature-settings: "smcp" 1;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .kicker-ruled::before {
+    content: "";
+    width: 1.5rem;
+    height: 2px;
+    background: currentColor;
+    display: inline-block;
+    flex: none;
+  }
+
+  /* HAIRLINE RULES */
+  .rule {
+    border: 0;
+    border-top: 1px solid var(--border);
+    height: 0;
+    margin: 0;
+  }
+  .rule-thick {
+    border-top-width: 2px;
+    border-color: color-mix(in oklch, var(--foreground) 75%, transparent);
+  }
+  .rule-double {
+    border: 0;
+    height: 4px;
+    border-top: 2px solid
+      color-mix(in oklch, var(--foreground) 80%, transparent);
+    border-bottom: 1px solid var(--primary);
+  }
+
+  /* PAPER GRAIN — full-bleed fixed layer, mounted once in App root */
+  .grain-layer {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 60;
+    opacity: var(--grain-opacity);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 180px 180px;
+    mix-blend-mode: multiply;
+  }
+  .dark .grain-layer {
+    mix-blend-mode: overlay;
+    opacity: var(--grain-opacity);
+  }
+
+  /* HALFTONE DOT FIELD */
+  .halftone {
+    background-image: radial-gradient(
+      var(--halftone-color) 1px,
+      transparent 1.5px
+    );
+    background-size: 6px 6px;
+  }
+  .halftone-lg {
+    background-image: radial-gradient(
+      var(--halftone-color) 1.4px,
+      transparent 2px
+    );
+    background-size: 10px 10px;
+  }
+  .halftone-fade {
+    -webkit-mask-image: radial-gradient(ellipse at center, black, transparent 72%);
+    mask-image: radial-gradient(ellipse at center, black, transparent 72%);
+  }
+  /* COVER SPLASH — a coarse, value-graded halftone "tone" like a CMYK shadow
+     separation: dense dots in one corner dissolving to nothing. Reads as
+     offset print, not uniform AI noise. */
+  .halftone-splash {
+    background-image: radial-gradient(var(--splash-dot) 3px, transparent 3.7px);
+    background-size: 13px 13px;
+    -webkit-mask-image: radial-gradient(
+      130% 120% at 98% 2%,
+      black 0%,
+      black 18%,
+      transparent 60%
+    );
+    mask-image: radial-gradient(
+      130% 120% at 98% 2%,
+      black 0%,
+      black 18%,
+      transparent 60%
+    );
+  }
+
+  /* DROP CAP */
+  .dropcap::first-letter {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: 3.4em;
+    line-height: 0.7;
+    float: left;
+    padding: 0.04em 0.12em 0 0;
+    color: var(--primary);
+  }
+
+  /* BIG EDITORIAL NUMERAL */
+  .stat-figure {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+    font-variation-settings: "opsz" 144;
+    line-height: 0.86;
+    letter-spacing: -0.015em;
+  }
+
+  /* MASTHEAD logotype */
+  .masthead {
+    font-family: var(--font-display);
+    font-weight: 900;
+    font-variation-settings: "opsz" 144;
+    letter-spacing: -0.025em;
+    line-height: 0.9;
+  }
+
+  /* Display headline helper */
+  .display {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-variation-settings: "opsz" 144;
+    line-height: 0.95;
+    letter-spacing: -0.015em;
+  }
+
+  /* LETTERPRESS sheen (subtle) */
+  .letterpress {
+    text-shadow: 0 1px 0 oklch(1 0 0 / 0.5);
+  }
+  .dark .letterpress {
+    text-shadow: 0 1px 0 oklch(0 0 0 / 0.4);
+  }
+
+  /* Halftone duotone treatment for headshots */
+  .duotone {
+    filter: grayscale(1) contrast(1.08) brightness(1.02);
+  }
+  .dark .duotone {
+    filter: grayscale(1) contrast(1.05) brightness(0.95);
   }
 }
