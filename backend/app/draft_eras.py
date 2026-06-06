@@ -52,10 +52,10 @@ class Franchise:
     stints: tuple[FranchiseStint, ...]
 
 
-# 1973-74 (the BPM/VORP floor) through 2024-25 (latest completed season),
-# partitioned into decade eras by season start year.
+# 1979-80 through 2024-25 (latest completed season), partitioned into decade
+# eras by season start year. (Basketball Reference publishes BPM/VORP from
+# 1973-74 on, but the draft challenge starts at the 1980s.)
 ERAS: tuple[DraftEra, ...] = (
-    DraftEra("1970s", "1970s", 1973, 1979),
     DraftEra("1980s", "1980s", 1979, 1989),
     DraftEra("1990s", "1990s", 1989, 1999),
     DraftEra("2000s", "2000s", 1999, 2009),

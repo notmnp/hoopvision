@@ -59,7 +59,7 @@ class ParsePositionsTest(unittest.TestCase):
 class EraFranchiseDataTest(unittest.TestCase):
     def test_eras_partition_without_gaps(self):
         eras = draft_eras.list_eras()
-        self.assertEqual([e["id"] for e in eras][0], "1970s")
+        self.assertEqual([e["id"] for e in eras][0], "1980s")
         for earlier, later in zip(eras, eras[1:]):
             # Half-open windows chain end-to-start so every season maps to one era.
             self.assertEqual(earlier["end_year"], later["start_year"])
@@ -73,10 +73,10 @@ class EraFranchiseDataTest(unittest.TestCase):
         self.assertEqual(tens["thunder"]["name"], "Oklahoma City Thunder")
 
     def test_expansion_team_absent_before_it_existed(self):
-        seventies = {f["id"] for f in draft_eras.list_franchises_for_era("1970s")}
-        self.assertNotIn("heat", seventies)  # Heat began play in 1988
-        self.assertNotIn("raptors", seventies)
-        self.assertIn("celtics", seventies)
+        eighties = {f["id"] for f in draft_eras.list_franchises_for_era("1980s")}
+        self.assertNotIn("hornets", eighties)  # Bobcats/Hornets began play in 2004
+        self.assertNotIn("raptors", eighties)  # Raptors began play in 1995
+        self.assertIn("celtics", eighties)
 
     def test_franchise_abbreviations_union_all_stints(self):
         self.assertEqual(
@@ -163,7 +163,7 @@ class DraftEndpointsTest(unittest.TestCase):
         response = self.client.get("/api/draft/eras")
         self.assertEqual(response.status_code, 200)
         ids = [e["id"] for e in response.json()["eras"]]
-        self.assertEqual(ids, ["1970s", "1980s", "1990s", "2000s", "2010s", "2020s"])
+        self.assertEqual(ids, ["1980s", "1990s", "2000s", "2010s", "2020s"])
 
     def test_franchises_endpoint_filters_by_era(self):
         response = self.client.get("/api/draft/franchises", params={"era": "1990s"})
