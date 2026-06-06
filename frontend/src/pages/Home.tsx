@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom"
-import { Activity, ArrowRight, ArrowUpRight, Swords, Trophy } from "lucide-react"
+import { ArrowRight, ArrowUpRight, Swords, Trophy, Users } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Kicker, Rule, StatFigure, HalftoneAvatar } from "@/components/editorial"
@@ -71,14 +71,13 @@ const DEPARTMENTS = [
     cta: "Draft the field",
   },
   {
-    to: "/live",
+    to: "/draft",
     figure: "03",
-    icon: Activity,
-    kicker: "The Wire",
-    title: "Live Scores",
-    copy: "Tonight's games and leaders, as they happen.",
-    cta: "Tonight's slate",
-    live: true,
+    icon: Users,
+    kicker: "The Draft",
+    title: "Draft a Team",
+    copy: "Assemble an all-time starting five and see if they go 82-0.",
+    cta: "Build your roster",
   },
 ]
 
@@ -265,14 +264,7 @@ const Home = () => {
               </span>
               <div className="relative flex items-center gap-2.5">
                 <dept.icon className="size-5 text-primary" />
-                {dept.live ? (
-                  <span className="ml-auto inline-flex items-center gap-1.5 bg-primary px-2 py-0.5 text-[0.7rem] font-bold uppercase tracking-[0.08em] text-primary-foreground">
-                    <span className="size-1.5 animate-pulse rounded-full bg-current" />
-                    Live
-                  </span>
-                ) : (
-                  <Kicker tone="muted">{dept.kicker}</Kicker>
-                )}
+                <Kicker tone="muted">{dept.kicker}</Kicker>
               </div>
               <h3 className="relative mt-4 font-display text-2xl font-bold uppercase leading-none">
                 {dept.title}
