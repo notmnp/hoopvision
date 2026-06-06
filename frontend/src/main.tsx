@@ -11,6 +11,7 @@ import Home from './pages/Home.tsx'
 import Scoreboard from './pages/Scoreboard.tsx'
 import Simulator from './pages/Simulator.tsx'
 import BracketSetup from './pages/BracketSetup.tsx'
+import DraftWorkspace from './pages/DraftWorkspace.tsx'
 import HowItWorksView from './pages/HowItWorksView.tsx'
 
 createRoot(document.getElementById('root')!).render(
@@ -25,6 +26,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/live" element={<Scoreboard />} />
             <Route path="/simulate" element={<Simulator />} />
             <Route path="/bracket/:bracketId?" element={<BracketSetup />} />
+            <Route path="/draft" element={<DraftWorkspace />} />
             <Route path="/how-it-works" element={<HowItWorksView />} />
           </Routes>
           <Analytics />
