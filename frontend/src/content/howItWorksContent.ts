@@ -182,22 +182,22 @@ score = POST /draft/score { players: lineup }   # -> { wins, losses, breakdown }
         {
           headers: ["Slot", "WS/48", "BPM", "VORP", "TS%"],
           rows: [
-            ["PG", "0.20", "0.40", "0.25", "0.15"],
-            ["SG", "0.15", "0.20", "0.30", "0.35"],
-            ["SF", "0.20", "0.20", "0.30", "0.30"],
-            ["PF", "0.40", "0.20", "0.25", "0.15"],
-            ["C", "0.45", "0.20", "0.25", "0.10"],
+            ["PG", "0.15", "0.35", "0.35", "0.15"],
+            ["SG", "0.15", "0.25", "0.35", "0.25"],
+            ["SF", "0.20", "0.25", "0.35", "0.20"],
+            ["PF", "0.30", "0.25", "0.35", "0.10"],
+            ["C", "0.35", "0.20", "0.35", "0.10"],
           ],
         },
       ],
       equations: [
-        String.raw`\hat{n}_{\text{ws}} = \mathrm{clamp}\!\left(\frac{\text{WS/48}}{0.30}\right),\quad \hat{n}_{\text{bpm}} = \mathrm{clamp}\!\left(\frac{\text{BPM} + 4}{14}\right),\quad \hat{n}_{\text{vorp}} = \mathrm{clamp}\!\left(\frac{\text{VORP}}{8}\right),\quad \hat{n}_{\text{ts}} = \mathrm{clamp}\!\left(\frac{\text{TS\%} - 0.48}{0.14}\right),\quad \mathrm{clamp}(x) \in [0,\, 1.2]`,
-        String.raw`\text{contribution}_i = w_{\text{ws}}\,\hat{n}_{\text{ws}} + w_{\text{bpm}}\,\hat{n}_{\text{bpm}} + w_{\text{vorp}}\,\hat{n}_{\text{vorp}} + w_{\text{ts}}\,\hat{n}_{\text{ts}}`,
-        String.raw`\text{coverage} = \frac{1}{4}\sum_{m}\max_{i}\,\hat{n}_{m,i},\qquad \text{balance} = 1 + 0.18\,\big(\text{coverage} - \overline{\text{contribution}}\big)`,
-        String.raw`\text{team\_score} = \text{balance} \cdot \sum_{i}\text{contribution}_i,\qquad \text{wins} = \mathrm{round}\!\left(\frac{82}{1 + e^{-0.716\,(\text{team\_score} - 1.089)}}\right)`,
+        String.raw`z_{\text{ws}} = \frac{\text{WS/48} - 0.10}{0.15},\quad z_{\text{bpm}} = \frac{\text{BPM}}{8},\quad z_{\text{vorp}} = \frac{\text{VORP} - 2.0}{4},\quad z_{\text{ts}} = \frac{\text{TS\%} - 0.56}{0.08},\quad z \in [-2,\, 2]`,
+        String.raw`r = \mathrm{clamp}\!\left(\frac{\text{MP}}{2000},\, 0.5,\, 1\right),\qquad \text{contribution}_i = w_{\text{ws}}\,r\,z_{\text{ws}} + w_{\text{bpm}}\,r\,z_{\text{bpm}} + w_{\text{vorp}}\,z_{\text{vorp}} + w_{\text{ts}}\,r\,z_{\text{ts}}`,
+        String.raw`\text{coverage} = \frac{1}{4}\sum_{m}\mathrm{clamp}\!\left(\max_{i}\,z_{m,i},\, 0,\, 1\right),\qquad \text{team\_score} = \sum_{i}\text{contribution}_i + 0.45\,\text{coverage}`,
+        String.raw`\text{wins} = \mathrm{round}\!\left(\frac{82}{1 + e^{-0.8\,\text{team\_score}}}\right)`,
       ],
       prose:
-        "The draw is stateless: the client holds the whole session and only makes three read-only calls (eras, franchises, pool) plus one POST to score, so a refresh starts over. A pool is the franchise's fourteen best players (by WS/48) whose peak season lands inside the era's decade window; if fewer than three players qualify, the API returns an auto_respin signal and the spin is redrawn for free. Scoring (DraftScoringEngine) uses four advanced metrics — WS/48, BPM, VORP, TS% — that are already era-normalized, so unlike the matchup simulator no separate era adjustment is applied. Each metric is normalized to a ~0..1 quality scale (0 = fringe rotation, 1 = elite peak) with a 1.2 overshoot ceiling so a historic outlier can't run away with the score. Per-player contribution uses position-specific weights (table above, each row sums to 1.0): guards lean on BPM and TS%, bigs on WS/48. The balance term rewards complementary lineups — coverage is the team's best value in each of the four dimensions, so a five that covers everything scores above its own per-player average and earns a bonus, while five players piled into the same strength get none. The team aggregate maps to a win total through a calibrated logistic, anchored so a league-average five (~1.5 aggregate) lands near 47 wins and a theoretically optimal five (~4.9) approaches 77. The per-player contribution shown in the result breakdown is exactly the weighted value that fed the aggregate, so the score stays explainable.",
+        "The draw is stateless: the client holds the whole session and only makes three read-only calls (eras, franchises, pool) plus one POST to score, so a refresh starts over. A pool is the franchise's fourteen best players (by WS/48) whose peak season lands inside the era's decade window; if fewer than three players qualify, the API returns an auto_respin signal and the spin is redrawn for free. Scoring (DraftScoringEngine) uses four advanced metrics — WS/48, BPM, VORP, TS% — that are already era-normalized, so unlike the matchup simulator no separate era adjustment is applied. Each metric is centered on a league-average starter: the league-average value maps to 0, an elite peak season to about +1, and a below-average season goes negative — so a weak starter actively drags the team down instead of being a free empty slot, with each metric capped at ±2 so one historic outlier can't run away with the score. Rate stats (WS/48, BPM, TS%) are shrunk toward average for small-minutes seasons via the reliability factor r, so a 500-minute specialist's gaudy rate isn't trusted as full-time starter production; VORP is already minutes-aware and carries the volume signal, so it isn't shrunk and anchors every position at 0.35 weight. Per-player contribution uses position-specific weights (table above, each row sums to 1.0): guards lean on BPM, bigs on WS/48, and TS% is a smaller efficiency garnish. The coverage term adds a small synergy bonus for a five that is genuinely above average in every dimension, rewarding complementary rosters over players piled into one strength. The team score maps to wins through a logistic centered at zero, so a league-average five lands near 41 wins (.500) while a stack of all-time peak seasons clears the rounding threshold to a perfect 82-0 — the game's stated goal. The per-player contribution shown in the result breakdown is exactly the centered value that fed the aggregate, so the score stays explainable.",
     },
   },
 ]

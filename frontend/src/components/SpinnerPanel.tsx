@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react"
-import { Dices, Loader2 } from "lucide-react"
+import { Dices, Info, Loader2 } from "lucide-react"
 
 import {
   DraftEra,
@@ -22,6 +22,11 @@ import { getTeamColor, getTeamLogoUrlByAbbr, withAlpha } from "@/lib/teamColors"
 import { cn } from "@/lib/utils"
 import { Kicker } from "@/components/editorial"
 import { Button } from "@/components/ui/button"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 export interface SpinResult {
   eraId: string
@@ -252,14 +257,16 @@ export const SpinnerPanel = forwardRef<SpinnerHandle, SpinnerPanelProps>(
     const teamColor = drawn ? getTeamColor(drawn.franchiseAbbr) : null
 
     return (
-      <div
-        className="relative overflow-hidden rounded-sm border bg-card p-5 transition-colors duration-500 sm:p-6"
-        style={
-          drawn && teamColor
-            ? { backgroundColor: withAlpha(teamColor, 0.06) }
-            : undefined
-        }
-      >
+      <div className="relative overflow-hidden rounded-sm border bg-card p-5 sm:p-6">
+        {/* A thin bar of the drawn team's color tops the card — absolutely
+            positioned so it overlays the border without affecting padding. */}
+        {drawn && teamColor && (
+          <div
+            aria-hidden
+            className="absolute inset-x-0 top-0 h-1"
+            style={{ backgroundColor: teamColor }}
+          />
+        )}
         {/* Offset-print halftone tone — the ISO Lab card treatment: a fine dot
             field bleeding from the top-right corner, neutral until a team is
             drawn, then flooded with the team's color. */}
@@ -288,7 +295,7 @@ export const SpinnerPanel = forwardRef<SpinnerHandle, SpinnerPanelProps>(
                 // The franchise AND the era both spin during the build-up,
                 // landing together in the same layout as the resolved draw.
                 <div className="mt-1 flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-                  <p className="display text-3xl leading-none text-foreground/80 sm:text-4xl">
+                  <p className="display text-2xl leading-none text-foreground/80 sm:text-3xl">
                     {flicker.franchise}
                   </p>
                   <span className="kicker text-muted-foreground/80">
@@ -296,7 +303,7 @@ export const SpinnerPanel = forwardRef<SpinnerHandle, SpinnerPanelProps>(
                   </span>
                 </div>
               ) : drawing ? (
-                <p className="display mt-1 text-3xl leading-none text-foreground/80 sm:text-4xl">
+                <p className="display mt-1 text-2xl leading-none text-foreground/80 sm:text-3xl">
                   Drawing the lot…
                 </p>
               ) : drawn ? (
@@ -304,7 +311,7 @@ export const SpinnerPanel = forwardRef<SpinnerHandle, SpinnerPanelProps>(
                   key={drawn.comboKey}
                   className="mt-1 flex flex-wrap items-baseline gap-x-2.5 gap-y-1 duration-300 animate-in fade-in zoom-in-90"
                 >
-                  <p className="display text-3xl leading-none text-primary sm:text-4xl">
+                  <p className="display text-2xl leading-none text-primary sm:text-3xl">
                     {drawn.franchiseName}
                   </p>
                   <span className="kicker text-muted-foreground">
@@ -312,26 +319,72 @@ export const SpinnerPanel = forwardRef<SpinnerHandle, SpinnerPanelProps>(
                   </span>
                 </div>
               ) : (
-                <p className="display mt-1 text-3xl leading-none sm:text-4xl">
-                  Who's on the clock?
-                </p>
+                <div className="mt-1 flex items-center gap-2">
+                  <p className="display text-2xl leading-none sm:text-3xl">
+                    Ready to draft?
+                  </p>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="How to play"
+                        className="flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        <Info className="h-4 w-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-[17rem] text-left">
+                      <p className="font-condensed text-[0.7rem] font-bold uppercase tracking-[0.14em] text-background/70">
+                        How to play
+                      </p>
+                      <ol className="mt-1.5 list-decimal space-y-1 pl-4 text-xs normal-case leading-relaxed">
+                        <li>Spin to draw a random era + franchise.</li>
+                        <li>Draft one player per slot, PG through C.</li>
+                        <li>
+                          Fill all five and your lineup is graded into an
+                          82-game record.
+                        </li>
+                      </ol>
+                      <p className="mt-1.5 text-xs italic leading-relaxed">
+                        Build a five great enough to go 82-0.
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
               )}
             </div>
           </div>
 
           {/* The draw CTA, inline to the right of the headline. */}
-          <Button
-            onClick={runSpin}
-            disabled={disabled || drawing || eras.length === 0}
-            className="shrink-0 font-condensed font-bold uppercase tracking-[0.14em]"
-          >
-            {drawing ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Dices className="h-4 w-4" />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              {/* Wrapped in a span so the tooltip still fires while the button
+                  is disabled (disabled controls emit no hover). */}
+              <span className="flex w-full shrink-0 sm:w-auto">
+                <Button
+                  onClick={runSpin}
+                  disabled={disabled || drawing || eras.length === 0}
+                  className="w-full font-condensed font-bold uppercase tracking-[0.14em]"
+                >
+                  {drawing ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Dices className="h-4 w-4" />
+                  )}
+                  {drawing
+                    ? "Drawing…"
+                    : drawn
+                      ? "Get your next team"
+                      : "Get your first team"}
+                </Button>
+              </span>
+            </TooltipTrigger>
+            {disabled && !drawing && (
+              <TooltipContent className="font-condensed text-xs font-bold uppercase tracking-[0.14em]">
+                Select and assign a player to your lineup first.
+              </TooltipContent>
             )}
-            {drawing ? "Drawing…" : drawn ? "Draw again" : "Draw a team"}
-          </Button>
+          </Tooltip>
         </div>
       </div>
     )

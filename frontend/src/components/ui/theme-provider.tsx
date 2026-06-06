@@ -33,6 +33,19 @@ export function ThemeProvider({
   useEffect(() => {
     const root = window.document.documentElement
 
+    // Kill CSS transitions for the single frame the theme class swaps, so every
+    // color token flips instantly instead of fading. Without this, elements with
+    // `transition-colors`/`transition-all` (e.g. the draft "on the clock" panel's
+    // `duration-500`) slowly cross-fade on every theme toggle. Hover effects and
+    // the draft draw-reveal animation aren't theme-driven, so they're unaffected.
+    const disableTransitions = document.createElement("style")
+    disableTransitions.appendChild(
+      document.createTextNode(
+        "*,*::before,*::after{transition:none !important}"
+      )
+    )
+    document.head.appendChild(disableTransitions)
+
     root.classList.remove("light", "dark")
 
     if (theme === "system") {
@@ -42,10 +55,23 @@ export function ThemeProvider({
         : "light"
 
       root.classList.add(systemTheme)
-      return
+    } else {
+      root.classList.add(theme)
     }
 
-    root.classList.add(theme)
+    // Force a synchronous style flush so the class change commits with
+    // transitions disabled, then re-enable them on the next tick.
+    window.getComputedStyle(document.body)
+    const timer = window.setTimeout(() => {
+      document.head.removeChild(disableTransitions)
+    }, 1)
+
+    return () => {
+      window.clearTimeout(timer)
+      if (disableTransitions.parentNode) {
+        disableTransitions.parentNode.removeChild(disableTransitions)
+      }
+    }
   }, [theme])
 
   const value = {

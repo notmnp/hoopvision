@@ -13,24 +13,30 @@ from backend.app.draft_scoring import (
     DraftScoringEngine,
 )
 
-# Synthetic player-seasons at three quality tiers, one per slot at each tier.
-# elite ~ peak MVP metrics; avg ~ league-average rotation; scrub ~ replacement.
+# Synthetic player-seasons at quality tiers, one per slot at each tier. Metrics
+# are centred on a league-average STARTER, so the tiers below are written to sit
+# at known points of that scale:
+#   goat  ~ all-time peak season (-> should be able to run the table 82-0)
+#   avg   ~ exactly a league-average starter (-> ~41 wins, .500)
+#   scrub ~ clearly below replacement on every metric (-> a losing record)
+# mp is set to a full starter load (>= _MP_FULL) for goat/avg so the minutes
+# reliability gate leaves their rate stats untouched.
 FAKE_CSV = """player_id,player_name,season_id,pos,teams,mp,ws_per_48,bpm,vorp,ts_pct
-10,Elite PG,2000-01,PG,AAA,3000,0.30,10.0,8.0,0.62
-11,Elite SG,2000-01,SG,AAA,3000,0.30,10.0,8.0,0.62
-12,Elite SF,2000-01,SF,AAA,3000,0.30,10.0,8.0,0.62
-13,Elite PF,2000-01,PF,AAA,3000,0.30,10.0,8.0,0.62
-14,Elite C,2000-01,C,AAA,3000,0.30,10.0,8.0,0.62
-20,Avg PG,2000-01,PG,BBB,2000,0.10,0.0,1.5,0.54
-21,Avg SG,2000-01,SG,BBB,2000,0.10,0.0,1.5,0.54
-22,Avg SF,2000-01,SF,BBB,2000,0.10,0.0,1.5,0.54
-23,Avg PF,2000-01,PF,BBB,2000,0.10,0.0,1.5,0.54
-24,Avg C,2000-01,C,BBB,2000,0.10,0.0,1.5,0.54
-30,Scrub PG,2000-01,PG,CCC,1000,0.02,-3.0,0.0,0.50
-31,Scrub SG,2000-01,SG,CCC,1000,0.02,-3.0,0.0,0.50
-32,Scrub SF,2000-01,SF,CCC,1000,0.02,-3.0,0.0,0.50
-33,Scrub PF,2000-01,PF,CCC,1000,0.02,-3.0,0.0,0.50
-34,Scrub C,2000-01,C,CCC,1000,0.02,-3.0,0.0,0.50
+10,Goat PG,2000-01,PG,AAA,3000,0.32,13.0,12.0,0.64
+11,Goat SG,2000-01,SG,AAA,3000,0.32,13.0,12.0,0.64
+12,Goat SF,2000-01,SF,AAA,3000,0.32,13.0,12.0,0.64
+13,Goat PF,2000-01,PF,AAA,3000,0.32,13.0,12.0,0.64
+14,Goat C,2000-01,C,AAA,3000,0.32,13.0,12.0,0.64
+20,Avg PG,2000-01,PG,BBB,2200,0.10,0.0,2.0,0.56
+21,Avg SG,2000-01,SG,BBB,2200,0.10,0.0,2.0,0.56
+22,Avg SF,2000-01,SF,BBB,2200,0.10,0.0,2.0,0.56
+23,Avg PF,2000-01,PF,BBB,2200,0.10,0.0,2.0,0.56
+24,Avg C,2000-01,C,BBB,2200,0.10,0.0,2.0,0.56
+30,Scrub PG,2000-01,PG,CCC,1000,0.02,-3.0,-0.5,0.50
+31,Scrub SG,2000-01,SG,CCC,1000,0.02,-3.0,-0.5,0.50
+32,Scrub SF,2000-01,SF,CCC,1000,0.02,-3.0,-0.5,0.50
+33,Scrub PF,2000-01,PF,CCC,1000,0.02,-3.0,-0.5,0.50
+34,Scrub C,2000-01,C,CCC,1000,0.02,-3.0,-0.5,0.50
 """
 
 SLOTS = ("PG", "SG", "SF", "PF", "C")
@@ -53,19 +59,23 @@ def _lineup(first_id: int):
 
 
 class ScoringCalibrationTest(unittest.TestCase):
-    def test_optimal_lineup_in_target_band(self):
+    def test_goat_lineup_can_run_the_table(self):
+        # A stack of all-time peak seasons must be able to go a perfect 82-0 —
+        # the game's stated objective.
         score = _engine().score(_lineup(10))
-        self.assertGreaterEqual(score.wins, 75)
-        self.assertLessEqual(score.wins, 78)
+        self.assertEqual(score.wins, GAMES)
+        self.assertEqual(score.losses, 0)
 
-    def test_average_lineup_in_target_band(self):
+    def test_average_lineup_near_500(self):
+        # A league-average starting five lands right around .500 (~41 wins).
         score = _engine().score(_lineup(20))
-        self.assertGreaterEqual(score.wins, 45)
-        self.assertLessEqual(score.wins, 50)
+        self.assertGreaterEqual(score.wins, 38)
+        self.assertLessEqual(score.wins, 44)
 
     def test_scrub_lineup_clearly_losing(self):
+        # Below-replacement players actively drag the team down — a clear loser.
         score = _engine().score(_lineup(30))
-        self.assertLess(score.wins, 40)
+        self.assertLess(score.wins, 30)
 
     def test_better_lineup_wins_more(self):
         eng = _engine()
@@ -93,13 +103,13 @@ class ScoringDeterminismAndShapeTest(unittest.TestCase):
         self.assertEqual(len(score.breakdown), 5)
         first = score.breakdown[0]
         self.assertEqual(first.player_id, 10)
-        self.assertEqual(first.name, "Elite PG")
+        self.assertEqual(first.name, "Goat PG")
         self.assertEqual(first.position_slot, "PG")
         self.assertIsInstance(first.contribution_score, float)
-        self.assertEqual(first.metrics.ws_per_48, 0.30)
-        self.assertEqual(first.metrics.bpm, 10.0)
-        self.assertEqual(first.metrics.vorp, 8.0)
-        self.assertEqual(first.metrics.ts_pct, 0.62)
+        self.assertEqual(first.metrics.ws_per_48, 0.32)
+        self.assertEqual(first.metrics.bpm, 13.0)
+        self.assertEqual(first.metrics.vorp, 12.0)
+        self.assertEqual(first.metrics.ts_pct, 0.64)
 
     def test_balance_rewards_complementary_over_redundant(self):
         # A team elite in every dimension should outscore one strong only in WS.

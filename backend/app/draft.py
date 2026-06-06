@@ -94,6 +94,7 @@ class _AdvancedRow:
     season_id: str
     positions: tuple[str, ...]
     teams: tuple[str, ...]
+    mp: float
     ws_per_48: float
     bpm: float
     vorp: float
@@ -147,6 +148,7 @@ def _load_rows(path: Path) -> list[_AdvancedRow]:
                     teams=tuple(
                         t for t in (raw.get("teams", "") or "").split(";") if t
                     ),
+                    mp=_to_float(raw.get("mp", "")),
                     ws_per_48=_to_float(raw.get("ws_per_48", "")),
                     bpm=_to_float(raw.get("bpm", "")),
                     vorp=_to_float(raw.get("vorp", "")),

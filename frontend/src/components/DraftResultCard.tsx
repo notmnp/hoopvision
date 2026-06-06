@@ -10,7 +10,7 @@ import {
   headshotUrl,
 } from "@/lib/draft"
 import { exportDraftCard } from "@/lib/draftExporter"
-import { getTeamColor, withAlpha } from "@/lib/teamColors"
+import { getTeamColor } from "@/lib/teamColors"
 import { cn } from "@/lib/utils"
 import { HalftoneAvatar, Kicker, Rule } from "@/components/editorial"
 import { Badge } from "@/components/ui/badge"
@@ -89,8 +89,17 @@ export function DraftResultCard({
   const lineupBySlot = new Map<PositionSlot, DraftSlot>(
     lineup.map((slot) => [slot.position, slot])
   )
+  // Contribution scores are centred on a league-average starter, so a
+  // below-average player is negative. We show each player's share of the team's
+  // value ABOVE replacement: measure every score against a replacement baseline,
+  // floor at zero, then take the share. Sums to ~100%, and a replacement-or-worse
+  // player reads ~0% instead of producing a nonsensical negative percentage.
+  const REPLACEMENT_CONTRIBUTION = -0.6
+  const aboveReplacement = (s: number) =>
+    Math.max(0, s - REPLACEMENT_CONTRIBUTION)
   const total =
-    score.breakdown.reduce((sum, b) => sum + b.contribution_score, 0) || 1
+    score.breakdown.reduce((sum, b) => sum + aboveReplacement(b.contribution_score), 0) ||
+    1
   const topScore = Math.max(...score.breakdown.map((b) => b.contribution_score))
   const rows: ResultRow[] = [...score.breakdown]
     .sort(
@@ -105,7 +114,7 @@ export function DraftResultCard({
         eraLabel: pick?.eraLabel ?? "",
         franchiseName: pick?.franchiseName ?? "",
         franchiseAbbr: pick?.franchiseAbbr ?? "",
-        contributionPct: (breakdown.contribution_score / total) * 100,
+        contributionPct: (aboveReplacement(breakdown.contribution_score) / total) * 100,
         isTopContributor: breakdown.contribution_score === topScore,
       }
     })
@@ -131,7 +140,7 @@ export function DraftResultCard({
           pages' result layouts. */}
       <div
         ref={cardRef}
-        className="grid gap-6 rounded-sm border bg-card p-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.55fr)]"
+        className="grid gap-6 rounded-sm border bg-card p-4 sm:p-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.55fr)]"
       >
         {/* The verdict — the editorial hero, framed on a halftone field. Gold
             (champion-only) lights up the splash for a rare elite record. */}
@@ -173,9 +182,11 @@ export function DraftResultCard({
         </div>
 
         <div className="flex flex-col">
-          <div className="flex items-center justify-between">
+          <div className="flex items-end justify-between gap-3">
             <Kicker tone="muted">By the Numbers</Kicker>
-            <span className="kicker text-muted-foreground">Contribution</span>
+            <span className="kicker text-right text-muted-foreground">
+              Share of value
+            </span>
           </div>
           <Rule className="my-3" />
           <div className="flex flex-col gap-2.5">
@@ -183,6 +194,10 @@ export function DraftResultCard({
               <ResultPlayerRow key={row.breakdown.position_slot} row={row} />
             ))}
           </div>
+          <p className="mt-3 font-display text-[0.78rem] italic leading-snug text-muted-foreground">
+            Share of value is each starter's slice of the lineup's total
+            production above a replacement-level player.
+          </p>
         </div>
       </div>
 
@@ -218,49 +233,53 @@ function ResultPlayerRow({ row }: { row: ResultRow }) {
   const teamColor = getTeamColor(franchiseAbbr)
 
   return (
-    <div
-      className="flex items-center gap-3 rounded-sm border border-l-[3px] border-border/70 p-2.5"
-      style={teamColor ? { borderLeftColor: withAlpha(teamColor, 0.7) } : undefined}
-    >
+    <div className="flex items-start gap-3 rounded-sm border border-border/70 p-2.5">
       <HalftoneAvatar
         src={headshotUrl(breakdown.player_id)}
         alt={breakdown.name}
         crossOrigin="anonymous"
-        size={48}
+        size={44}
         active
         accent={teamColor ?? undefined}
         className="rounded-sm"
       />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <div className="flex items-center gap-2">
-          <Badge variant="secondary" className="px-1.5 py-0">
+        {/* Name line carries the share-of-value figure on the right, so the row
+            needs no fixed right column — the text column gets the full width. */}
+        <div className="flex items-baseline gap-2">
+          <Badge variant="secondary" className="shrink-0 px-1.5 py-0">
             {breakdown.position_slot}
           </Badge>
-          <span className="truncate font-display text-sm font-semibold">
+          <span className="min-w-0 flex-1 truncate font-display text-sm font-semibold">
             {breakdown.name}
           </span>
+          <span className="flex shrink-0 items-baseline gap-0.5">
+            <span className="stat-figure text-xl leading-none tabular-nums">
+              {contributionPct.toFixed(0)}
+            </span>
+            <span className="font-display text-xs font-semibold text-muted-foreground">
+              %
+            </span>
+          </span>
         </div>
-        <span className="kicker text-muted-foreground">
+        <span className="kicker truncate text-muted-foreground">
           {[eraLabel, franchiseName].filter(Boolean).join(" · ")}
         </span>
-        <div className="mt-0.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[0.72rem] tabular-nums">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[0.72rem] tabular-nums">
           <Metric label="WS/48" value={threeDp(metrics.ws_per_48)} />
           <Metric label="BPM" value={signed(metrics.bpm)} />
           <Metric label="VORP" value={oneDp(metrics.vorp)} />
           <Metric label="TS" value={pct(metrics.ts_pct)} />
         </div>
-      </div>
-      {/* Contribution share — a squared, printed meter (no pill), vermillion
-          only for the team's leading contributor. */}
-      <div className="flex w-16 shrink-0 flex-col items-end gap-1">
-        <span className="stat-figure text-lg">{contributionPct.toFixed(0)}%</span>
-        <span className="h-1 w-full overflow-hidden rounded-[1px] bg-muted">
+        {/* Share-of-value meter, full-width under the row so it reads as a
+            printed bar chart; vermillion fill only for the top contributor. */}
+        <span className="mt-1 block h-1 w-full overflow-hidden rounded-[1px] bg-muted">
           <span
             className={cn(
               "block h-full",
-              row.isTopContributor ? "bg-primary" : "bg-foreground/35"
+              row.isTopContributor ? "bg-primary" : "bg-foreground/40"
             )}
-            style={{ width: `${Math.min(100, contributionPct)}%` }}
+            style={{ width: `${Math.min(100, Math.max(3, contributionPct))}%` }}
           />
         </span>
       </div>

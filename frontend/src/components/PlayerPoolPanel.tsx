@@ -46,10 +46,13 @@ const STAT_COLUMNS: {
   { key: "fg_pct", label: "FG%", sortable: false },
 ]
 
-// Avatar · name · six stat columns, shared by the header and every row so the
-// figures line up as a printed table.
+// Avatar · name · stat columns, shared by the header and every row so the
+// figures line up as a printed table. On phones only the first three counting
+// stats fit beside a readable name, so the grid drops to three columns and the
+// trailing stats hide (see MOBILE_STAT_COLUMNS); from sm up all six show.
+const MOBILE_STAT_COLUMNS = 3
 const GRID_TEMPLATE =
-  "grid-cols-[2.25rem_minmax(0,1fr)_repeat(6,2.75rem)] sm:grid-cols-[2.5rem_minmax(0,1fr)_repeat(6,3.25rem)]"
+  "grid-cols-[2.25rem_minmax(0,1fr)_repeat(3,2.75rem)] sm:grid-cols-[2.5rem_minmax(0,1fr)_repeat(6,3.25rem)]"
 
 export function PlayerPoolPanel({
   players,
@@ -73,26 +76,19 @@ export function PlayerPoolPanel({
 
   return (
     <div className="flex flex-col gap-3 rounded-sm border bg-card p-4">
-      <div className="flex items-baseline justify-between gap-2">
-        <Kicker ruled>The Pool</Kicker>
-        <span className="kicker tabular-nums text-muted-foreground">
-          {players.length} available
-        </span>
-      </div>
-      <Rule />
-
-      {/* Column heads double as the sort control: click a stat to sort by it.
-          A fixed-width arrow slot keeps the label from shifting when active. */}
+      {/* The title shares the table header row: "The Pool" sits over the
+          name column and the stat heads double as the sort control. A
+          fixed-width arrow slot keeps each label from shifting when active. */}
       <div
         className={cn(
-          "grid items-end gap-x-2 px-2.5 pb-1 sm:gap-x-3",
+          "grid items-end gap-x-2 px-2.5 sm:gap-x-3",
           GRID_TEMPLATE
         )}
       >
-        <span aria-hidden />
-        <span aria-hidden />
-        {STAT_COLUMNS.map((col) => {
+        <Kicker className="col-span-2">Select a player</Kicker>
+        {STAT_COLUMNS.map((col, idx) => {
           const active = col.sortable && sortKey === col.key
+          const hideOnPhone = idx >= MOBILE_STAT_COLUMNS && "hidden sm:flex"
           return col.sortable ? (
             <button
               key={col.key}
@@ -100,8 +96,9 @@ export function PlayerPoolPanel({
               onClick={() => setSortKey(col.key as SortKey)}
               aria-pressed={active}
               className={cn(
-                "kicker flex items-center justify-end transition-colors hover:text-foreground",
-                active ? "text-primary" : "text-muted-foreground"
+                "kicker flex items-center justify-end transition-colors",
+                active ? "text-primary" : "text-muted-foreground",
+                hideOnPhone
               )}
             >
               {col.label}
@@ -113,7 +110,10 @@ export function PlayerPoolPanel({
           ) : (
             <span
               key={col.key}
-              className="kicker flex items-center justify-end text-muted-foreground/70"
+              className={cn(
+                "kicker flex items-center justify-end text-muted-foreground/70",
+                hideOnPhone
+              )}
             >
               {col.label}
               <span className="ml-0.5 h-3 w-3 shrink-0" aria-hidden />
@@ -121,6 +121,7 @@ export function PlayerPoolPanel({
           )
         })}
       </div>
+      <Rule />
 
       <div className="flex max-h-[26rem] flex-col gap-1 overflow-y-auto">
         {visible.map((player) => {
@@ -134,7 +135,7 @@ export function PlayerPoolPanel({
               aria-pressed={selected}
               onClick={() => onSelect(selected ? null : player)}
               className={cn(
-                "grid items-center gap-x-1 rounded-sm border bg-card/70 px-2.5 py-2 text-left transition-colors sm:gap-x-2",
+                "grid items-center gap-x-2 rounded-sm border bg-card/70 px-2.5 py-2 text-left transition-colors sm:gap-x-3",
                 GRID_TEMPLATE,
                 selected
                   ? "border-primary bg-primary/5"
@@ -172,7 +173,7 @@ export function PlayerPoolPanel({
                   )}
                 </span>
               </div>
-              {STAT_COLUMNS.map((col) => (
+              {STAT_COLUMNS.map((col, idx) => (
                 <span
                   key={col.key}
                   className={cn(
@@ -180,7 +181,8 @@ export function PlayerPoolPanel({
                     col.sortable && sortKey === col.key
                       ? "text-primary"
                       : "text-foreground",
-                    !col.sortable && "text-muted-foreground"
+                    !col.sortable && "text-muted-foreground",
+                    idx >= MOBILE_STAT_COLUMNS && "hidden sm:flex"
                   )}
                 >
                   {col.key === "fg_pct"

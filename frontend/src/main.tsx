@@ -17,7 +17,7 @@ import HowItWorksView from './pages/HowItWorksView.tsx'
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
-      <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
+      <ThemeProvider defaultTheme="system" storageKey="vite-ui-theme">
         <TooltipProvider delayDuration={200}>
           <div className="grain-layer" aria-hidden />
           <Navbar />

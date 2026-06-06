@@ -35,9 +35,22 @@ export async function exportDraftCard(
     useCORS: true,
     backgroundColor: background,
     scale,
-    // Flatten resolved colors onto the clone and kill entrance animations: the
-    // theme's translucent oklch/color-mix tints render unreliably otherwise, and
-    // a freshly-cloned `animate-in` element would capture at its t=0 keyframe.
+    // Flatten resolved styles onto the clone and kill entrance animations so the
+    // PNG matches the page. Reasons:
+    //  - The theme's translucent oklch/color-mix tints (card, muted track,
+    //    foreground/40 bar fill, team-colored left borders) render unreliably
+    //    unless we copy the already-resolved rgba() that getComputedStyle gives.
+    //  - The halftone dot fields paint via `background-image:
+    //    radial-gradient(var(--halftone-color)…)`; copying the *computed*
+    //    backgroundImage hands html2canvas a literal gradient with the var()
+    //    already substituted, so the texture survives the capture.
+    //  - The champion "splash" relies on a CSS `mask-image` to fade into a
+    //    corner. html2canvas can't apply masks, so an unmasked clone would paint
+    //    the dot field across the whole panel. We drop the mask AND the
+    //    background-image together for masked nodes so the capture matches the
+    //    on-screen framing rather than smearing dots edge-to-edge.
+    //  - A freshly-cloned `animate-in` element would otherwise capture frozen at
+    //    its t=0 (opacity:0) keyframe.
     onclone: (_doc, cloned) => {
       const originals = [node, ...node.querySelectorAll<HTMLElement>("*")]
       const clones = [
@@ -52,6 +65,19 @@ export async function exportDraftCard(
         clone.style.color = computed.color
         clone.style.borderColor = computed.borderColor
         clone.style.animation = "none"
+
+        const hasMask =
+          (computed.maskImage && computed.maskImage !== "none") ||
+          (computed.webkitMaskImage && computed.webkitMaskImage !== "none")
+        if (hasMask) {
+          // html2canvas ignores masks; without the source image too, a masked
+          // halftone splash would otherwise tile across the entire panel.
+          clone.style.backgroundImage = "none"
+          clone.style.maskImage = "none"
+          clone.style.webkitMaskImage = "none"
+        } else if (computed.backgroundImage && computed.backgroundImage !== "none") {
+          clone.style.backgroundImage = computed.backgroundImage
+        }
       }
     },
   })

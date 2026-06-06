@@ -11,11 +11,13 @@ import {
   postScore,
 } from "@/lib/draft"
 import { cn } from "@/lib/utils"
+import { useMediaQuery } from "@/hooks/useMediaQuery"
 import { Kicker, Rule } from "@/components/editorial"
 import { HeaderBackdrop } from "@/components/HeaderBackdrop"
 import { SpinnerPanel, SpinnerHandle, SpinResult } from "@/components/SpinnerPanel"
 import { CourtDraftBoard } from "@/components/CourtDraftBoard"
 import { PlayerPoolPanel } from "@/components/PlayerPoolPanel"
+import { PlacementSheet } from "@/components/PlacementSheet"
 import { DraftResultCard } from "@/components/DraftResultCard"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
@@ -49,6 +51,10 @@ export default function DraftWorkspace() {
   const [error, setError] = useState<string | null>(null)
 
   const spinnerRef = useRef<SpinnerHandle>(null)
+
+  // Below lg the Starting Five board is a long scroll below the pool, so a
+  // selection there can't be placed at a glance — raise a bottom sheet instead.
+  const isCompact = useMediaQuery("(max-width: 1023px)")
 
   const filledCount = lineup.filter((slot) => slot.pick !== null).length
 
@@ -155,7 +161,7 @@ export default function DraftWorkspace() {
         <HeaderBackdrop figure="82-0" />
         <div>
           <Kicker ruled>The Front Office</Kicker>
-          <h1 className="mt-2 display text-5xl sm:text-6xl">Draft a Team</h1>
+          <h1 className="mt-2 display text-5xl sm:text-6xl">Create a Dynasty</h1>
           <p className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 font-condensed text-[0.78rem] font-bold uppercase tracking-[0.14em] text-muted-foreground">
             <span>Spin an era + franchise</span>
             <span aria-hidden>·</span>
@@ -241,14 +247,29 @@ export default function DraftWorkspace() {
           </aside>
         </div>
       )}
+
+      {/* Touch-first placement: on compact screens a pool selection opens a
+          bottom sheet to choose the slot, rather than scrolling to the board. */}
+      <PlacementSheet
+        open={isCompact && !isResult && selectedPlayer !== null}
+        player={selectedPlayer}
+        lineup={lineup}
+        franchiseAbbr={currentSpin?.franchiseAbbr}
+        onOpenChange={(open) => {
+          if (!open) setSelectedPlayer(null)
+        }}
+        onPlace={handlePlace}
+      />
     </div>
   )
 }
 
 // Idle main-column placeholder so the spread has presence before the first draw.
+// Hidden on phones, where the empty dashed box is just dead space below the
+// spinner — the draw CTA already tells you what to do.
 function DrawHint() {
   return (
-    <div className="flex h-[31rem] flex-col items-center justify-center gap-2 rounded-sm border border-dashed p-10 text-center">
+    <div className="hidden h-[31rem] flex-col items-center justify-center gap-2 rounded-sm border border-dashed p-10 text-center sm:flex">
       <Kicker tone="muted">The Pool</Kicker>
       <p className="max-w-prose font-display text-lg italic leading-snug text-muted-foreground">
         Draw an era and franchise to reveal their player pool.
