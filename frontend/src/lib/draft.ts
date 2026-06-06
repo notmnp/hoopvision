@@ -10,6 +10,15 @@ export type PositionSlot = "PG" | "SG" | "SF" | "PF" | "C"
 // Court order: PG, SG, SF, PF, C — the slot sequence used everywhere.
 export const SLOT_ORDER: PositionSlot[] = ["PG", "SG", "SF", "PF", "C"]
 
+// Full position names for the empty-slot labels on the lineup card.
+export const POSITION_LABEL: Record<PositionSlot, string> = {
+  PG: "Point Guard",
+  SG: "Shooting Guard",
+  SF: "Small Forward",
+  PF: "Power Forward",
+  C: "Center",
+}
+
 export interface DraftEra {
   id: string
   label: string
@@ -27,8 +36,11 @@ export interface PlayerPoolStats {
   ppg: number
   apg: number
   rpg: number
+  spg: number
+  bpg: number
+  fg_pct: number
+  // Kept for parity with the API payload; not shown in the draft pool.
   ws_per_48: number
-  bpm: number
 }
 
 export interface PlayerPoolEntry {
@@ -61,6 +73,7 @@ export interface DraftPick {
   eraLabel: string
   franchiseId: string
   franchiseName: string
+  franchiseAbbr: string
 }
 
 export interface DraftSlot {

@@ -158,4 +158,46 @@ export const sections: SectionDefinition[] = [
         "When the Combine has no wingspan on file (mostly players drafted before 2000), it falls back to a bundled roster dataset, then a curated list of legends, then a position-average constant as a last resort. Tendency model artifact: tendency_model_v2_matchup_conditioned.joblib, trained offline on NBA play-by-play matchup data and retrained once a year at season's end; the artifact version and ModelCalibrationReport are logged at API Server startup. Play-by-play matchup data gets thin before the 1996-97 season, so players from earlier eras tend to land in the MEDIUM or LOW tiers.",
     },
   },
+  {
+    id: "draft-82-0",
+    title: "The 82-0 Draft",
+    plainEnglish:
+      "The 82-0 Draft is a different game from the matchup simulator. You spin a random era + franchise, draw a pool of that team's best players from that decade, and draft a starting five, one player per position, PG through C. Once all five slots are filled, the lineup is graded into a full 82-game record, so a roster comes out looking like a title contender or a lottery team. The scoring leans on advanced metrics that are already built for cross-era comparison, so it rewards two things: drafting genuinely great players, and drafting players who complement each other instead of five who all do the same one thing well. A balanced five that covers every dimension beats a lopsided one stacked on a single strength.",
+    technical: {
+      pseudocode: `# Draw phase (stateless; client holds all state, server just answers reads)
+era       = random_unseen(GET /draft/eras)
+franchise = random_unseen(GET /draft/franchises?era=era)
+pool      = GET /draft/pool?era=era&franchise_id=franchise&exclude=seen_ids
+if pool.auto_respin:          # < 3 viable players for the combo
+    redraw()                  # spin again, no slot burned
+# pool = top 14 players by WS/48, peak franchise-season within the era window
+
+# Placement phase (one player per slot, must be position-eligible)
+for slot in [PG, SG, SF, PF, C]:
+    lineup[slot] = user_pick(pool, eligible_for=slot)
+
+# Score phase
+score = POST /draft/score { players: lineup }   # -> { wins, losses, breakdown }`,
+      tables: [
+        {
+          headers: ["Slot", "WS/48", "BPM", "VORP", "TS%"],
+          rows: [
+            ["PG", "0.20", "0.40", "0.25", "0.15"],
+            ["SG", "0.15", "0.20", "0.30", "0.35"],
+            ["SF", "0.20", "0.20", "0.30", "0.30"],
+            ["PF", "0.40", "0.20", "0.25", "0.15"],
+            ["C", "0.45", "0.20", "0.25", "0.10"],
+          ],
+        },
+      ],
+      equations: [
+        String.raw`\hat{n}_{\text{ws}} = \mathrm{clamp}\!\left(\frac{\text{WS/48}}{0.30}\right),\quad \hat{n}_{\text{bpm}} = \mathrm{clamp}\!\left(\frac{\text{BPM} + 4}{14}\right),\quad \hat{n}_{\text{vorp}} = \mathrm{clamp}\!\left(\frac{\text{VORP}}{8}\right),\quad \hat{n}_{\text{ts}} = \mathrm{clamp}\!\left(\frac{\text{TS\%} - 0.48}{0.14}\right),\quad \mathrm{clamp}(x) \in [0,\, 1.2]`,
+        String.raw`\text{contribution}_i = w_{\text{ws}}\,\hat{n}_{\text{ws}} + w_{\text{bpm}}\,\hat{n}_{\text{bpm}} + w_{\text{vorp}}\,\hat{n}_{\text{vorp}} + w_{\text{ts}}\,\hat{n}_{\text{ts}}`,
+        String.raw`\text{coverage} = \frac{1}{4}\sum_{m}\max_{i}\,\hat{n}_{m,i},\qquad \text{balance} = 1 + 0.18\,\big(\text{coverage} - \overline{\text{contribution}}\big)`,
+        String.raw`\text{team\_score} = \text{balance} \cdot \sum_{i}\text{contribution}_i,\qquad \text{wins} = \mathrm{round}\!\left(\frac{82}{1 + e^{-0.716\,(\text{team\_score} - 1.089)}}\right)`,
+      ],
+      prose:
+        "The draw is stateless: the client holds the whole session and only makes three read-only calls (eras, franchises, pool) plus one POST to score, so a refresh starts over. A pool is the franchise's fourteen best players (by WS/48) whose peak season lands inside the era's decade window; if fewer than three players qualify, the API returns an auto_respin signal and the spin is redrawn for free. Scoring (DraftScoringEngine) uses four advanced metrics — WS/48, BPM, VORP, TS% — that are already era-normalized, so unlike the matchup simulator no separate era adjustment is applied. Each metric is normalized to a ~0..1 quality scale (0 = fringe rotation, 1 = elite peak) with a 1.2 overshoot ceiling so a historic outlier can't run away with the score. Per-player contribution uses position-specific weights (table above, each row sums to 1.0): guards lean on BPM and TS%, bigs on WS/48. The balance term rewards complementary lineups — coverage is the team's best value in each of the four dimensions, so a five that covers everything scores above its own per-player average and earns a bonus, while five players piled into the same strength get none. The team aggregate maps to a win total through a calibrated logistic, anchored so a league-average five (~1.5 aggregate) lands near 47 wins and a theoretically optimal five (~4.9) approaches 77. The per-player contribution shown in the result breakdown is exactly the weighted value that fed the aggregate, so the score stays explainable.",
+    },
+  },
 ]

@@ -40,6 +40,7 @@ SEASON_STAT_COLUMNS = (
 _TOTAL_COLUMNS = (
     "GP",
     "PTS",
+    "FGM",
     "FGA",
     "FG3A",
     "FTA",
@@ -117,6 +118,7 @@ def season_stats_from_totals(
         "team_abbreviation": team_abbreviation,
         "points_per_game": _per_game(totals.get("PTS"), games),
         "fga_per_game": _per_game(totals.get("FGA"), games),
+        "field_goal_percentage": _safe_rate(totals.get("FGM"), totals.get("FGA")),
         "three_point_attempt_rate": _safe_rate(totals.get("FG3A"), totals.get("FGA")),
         "free_throw_attempt_rate": _safe_rate(totals.get("FTA"), totals.get("FGA")),
         "assist_per_game": _per_game(totals.get("AST"), games),

@@ -10,6 +10,7 @@ import {
   emptyLineup,
   postScore,
 } from "@/lib/draft"
+import { cn } from "@/lib/utils"
 import { Kicker, Rule } from "@/components/editorial"
 import { HeaderBackdrop } from "@/components/HeaderBackdrop"
 import { SpinnerPanel, SpinnerHandle, SpinResult } from "@/components/SpinnerPanel"
@@ -107,6 +108,7 @@ export default function DraftWorkspace() {
                 eraLabel: currentSpin.eraLabel,
                 franchiseId: currentSpin.franchiseId,
                 franchiseName: currentSpin.franchiseName,
+                franchiseAbbr: currentSpin.franchiseAbbr,
               },
             }
           : slot
@@ -150,21 +152,33 @@ export default function DraftWorkspace() {
   return (
     <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-screen-xl flex-col px-4 py-8 md:px-6">
       <div className="relative isolate mb-6 flex flex-col gap-4 pb-6 md:flex-row md:items-end md:justify-between">
-        <HeaderBackdrop figure="DRAFT" />
+        <HeaderBackdrop figure="82-0" />
         <div>
-          <Kicker ruled>Luck Meets Strategy</Kicker>
-          <h1 className="mt-2 display text-5xl sm:text-6xl">All-Time Draft</h1>
+          <Kicker ruled>The Front Office</Kicker>
+          <h1 className="mt-2 display text-5xl sm:text-6xl">Draft a Team</h1>
           <p className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 font-condensed text-[0.78rem] font-bold uppercase tracking-[0.14em] text-muted-foreground">
             <span>Spin an era + franchise</span>
             <span aria-hidden>·</span>
             <span>Draft a starting five</span>
             <span aria-hidden>·</span>
-            <span>Simulate 82 games</span>
+            <span>Sim the season</span>
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <span className="kicker tabular-nums text-muted-foreground">
-            {filledCount} / 5 drafted
+          <span
+            className={cn(
+              "size-2 shrink-0 rounded-full",
+              filledCount === 5 ? "bg-court" : "bg-muted-foreground/40"
+            )}
+            aria-hidden
+          />
+          <span
+            className={cn(
+              "kicker tabular-nums",
+              filledCount === 5 ? "text-foreground" : "text-muted-foreground"
+            )}
+          >
+            {filledCount === 5 ? "Five drafted" : `${filledCount} / 5 drafted`}
           </span>
         </div>
       </div>
@@ -190,14 +204,9 @@ export default function DraftWorkspace() {
           onPlayAgain={handlePlayAgain}
         />
       ) : (
-        <div className="grid gap-6 lg:grid-cols-[1fr_22rem]">
-          <CourtDraftBoard
-            lineup={lineup}
-            selectedPlayer={selectedPlayer}
-            onPlace={handlePlace}
-          />
-
-          <div className="flex flex-col gap-4">
+        <div className="grid gap-6 lg:grid-cols-[1fr_20rem]">
+          {/* Main column: the draw hero + the player pool it surfaces. */}
+          <div className="flex min-w-0 flex-col gap-6">
             <SpinnerPanel
               ref={spinnerRef}
               seenComboKeys={seenComboKeys}
@@ -208,23 +217,42 @@ export default function DraftWorkspace() {
               onError={handleSpinError}
             />
 
-            {phase === "placement" && currentSpin && (
-              <>
-                <p className="text-center font-condensed text-[0.78rem] font-bold uppercase tracking-[0.14em] text-muted-foreground">
-                  {currentSpin.eraLabel} · {currentSpin.franchiseName}
-                </p>
-                <PlayerPoolPanel
-                  players={pool}
-                  lineup={lineup}
-                  selectedPlayer={selectedPlayer}
-                  onSelect={setSelectedPlayer}
-                  onRespin={handleRespin}
-                />
-              </>
-            )}
+            {phase === "placement" && currentSpin ? (
+              <PlayerPoolPanel
+                players={pool}
+                lineup={lineup}
+                selectedPlayer={selectedPlayer}
+                franchiseAbbr={currentSpin.franchiseAbbr}
+                onSelect={setSelectedPlayer}
+                onRespin={handleRespin}
+              />
+            ) : phase === "idle" ? (
+              <DrawHint />
+            ) : null}
           </div>
+
+          {/* Sidebar: the running starting five, sticky as you scroll the pool. */}
+          <aside className="lg:sticky lg:top-20 lg:self-start">
+            <CourtDraftBoard
+              lineup={lineup}
+              selectedPlayer={selectedPlayer}
+              onPlace={handlePlace}
+            />
+          </aside>
         </div>
       )}
+    </div>
+  )
+}
+
+// Idle main-column placeholder so the spread has presence before the first draw.
+function DrawHint() {
+  return (
+    <div className="flex h-[31rem] flex-col items-center justify-center gap-2 rounded-sm border border-dashed p-10 text-center">
+      <Kicker tone="muted">The Pool</Kicker>
+      <p className="max-w-prose font-display text-lg italic leading-snug text-muted-foreground">
+        Draw an era and franchise to reveal their player pool.
+      </p>
     </div>
   )
 }

@@ -1,12 +1,22 @@
-// DraftExporter — captures the DraftResultCard as a downloadable PNG share card.
+// DraftExporter — captures the DraftResultCard as a downloadable PNG share card,
+// composited onto a padded canvas with a printed Hooper masthead so the shared
+// image reads like an almanac "draft results" page (the same branded-poster
+// treatment as the GOAT Bracket export).
 //
 // ADR-004: html2canvas runs client-side (no server image service). The library
 // is lazy-loaded via dynamic import on the share trigger so it stays out of the
 // initial bundle. Headshots are served through the API's /headshot proxy and
 // rendered crossOrigin="anonymous", so useCORS lets html2canvas read their
-// pixels without tainting the canvas. We use the html2canvas-pro fork because
-// the Tailwind v4 theme defines colors with oklch(), which the original
-// html2canvas can't parse — the same reason GOAT Bracket's exporter uses it.
+// pixels without tainting the canvas. We use html2canvas-pro because the
+// Tailwind v4 theme defines colors with oklch(), which the original html2canvas
+// can't parse.
+
+// Padding (CSS px, pre-scale) framing the card in the exported image.
+const EXPORT_PADDING = 40
+// Height reserved for the top-left Hooper masthead (wordmark + page title).
+const BRAND_HEIGHT = 46
+// Gap between the masthead band and the card below it.
+const BRAND_GAP = 24
 
 export async function exportDraftCard(
   node: HTMLElement | null,
@@ -14,8 +24,6 @@ export async function exportDraftCard(
 ): Promise<void> {
   if (!node) return
 
-  // Ensure the editorial web fonts are loaded so the capture doesn't fall back
-  // to a system serif/sans mid-render.
   await ensureBrandFontsLoaded()
 
   const { default: html2canvas } = await import("html2canvas-pro")
@@ -23,14 +31,13 @@ export async function exportDraftCard(
   const scale = window.devicePixelRatio > 1 ? 2 : 1
   const background = getComputedBackgroundColor(node)
 
-  const canvas = await html2canvas(node, {
+  const cardCanvas = await html2canvas(node, {
     useCORS: true,
     backgroundColor: background,
     scale,
-    // Flatten every element's resolved color onto the clone and kill entrance
-    // animations: the theme's translucent oklch/color-mix tints render
-    // unreliably otherwise, and a freshly-cloned `animate-in` element would be
-    // captured at its t=0 (invisible) keyframe.
+    // Flatten resolved colors onto the clone and kill entrance animations: the
+    // theme's translucent oklch/color-mix tints render unreliably otherwise, and
+    // a freshly-cloned `animate-in` element would capture at its t=0 keyframe.
     onclone: (_doc, cloned) => {
       const originals = [node, ...node.querySelectorAll<HTMLElement>("*")]
       const clones = [
@@ -49,7 +56,28 @@ export async function exportDraftCard(
     },
   })
 
-  triggerDownload(canvas.toDataURL("image/png"), exportFilename(record))
+  // Composite onto a padded canvas with a masthead band in the top-left.
+  const pad = EXPORT_PADDING * scale
+  const brandH = BRAND_HEIGHT * scale
+  const gap = BRAND_GAP * scale
+
+  const output = document.createElement("canvas")
+  output.width = cardCanvas.width + pad * 2
+  output.height = cardCanvas.height + pad * 2 + brandH + gap
+
+  const ctx = output.getContext("2d")
+  if (!ctx) {
+    triggerDownload(cardCanvas.toDataURL("image/png"), exportFilename(record))
+    return
+  }
+
+  ctx.fillStyle = background
+  ctx.fillRect(0, 0, output.width, output.height)
+
+  await drawBranding(ctx, pad, pad, brandH, scale)
+  ctx.drawImage(cardCanvas, pad, pad + brandH + gap)
+
+  triggerDownload(output.toDataURL("image/png"), exportFilename(record))
 }
 
 export function exportFilename({
@@ -62,12 +90,49 @@ export function exportFilename({
   return `all-time-draft-${wins}-${losses}.png`
 }
 
+// Logo + "Hooper" wordmark (Fraunces) + "ALL-TIME DRAFT" page title (tracked
+// Archivo), anchored at (x, y) within a band of the given height — matching the
+// bracket poster's branding so shared draft images share the same masthead.
+async function drawBranding(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  height: number,
+  scale: number
+): Promise<void> {
+  const isDark = document.documentElement.classList.contains("dark")
+  const logoSrc = isDark ? "/img/logo_white.svg" : "/img/logo_black.svg"
+  const textColor = window.getComputedStyle(document.body).color || "#000000"
+
+  const logo = await loadImage(logoSrc).catch(() => null)
+  let textX = x
+  if (logo) {
+    ctx.drawImage(logo, x, y, height, height)
+    textX = x + height + 14 * scale
+  }
+
+  ctx.fillStyle = textColor
+  ctx.textBaseline = "alphabetic"
+
+  ctx.font = `900 ${23 * scale}px Fraunces, Georgia, "Times New Roman", serif`
+  ctx.fillText("Hooper", textX, y + 20 * scale)
+
+  ctx.globalAlpha = 0.65
+  const spacedCtx = ctx as CanvasRenderingContext2D & { letterSpacing?: string }
+  const prevSpacing = spacedCtx.letterSpacing
+  spacedCtx.letterSpacing = `${1.6 * scale}px`
+  ctx.font = `700 ${12 * scale}px Archivo, "Helvetica Neue", system-ui, sans-serif`
+  ctx.fillText("ALL-TIME DRAFT", textX, y + 39 * scale)
+  if (prevSpacing !== undefined) spacedCtx.letterSpacing = prevSpacing
+  ctx.globalAlpha = 1
+}
+
 async function ensureBrandFontsLoaded(): Promise<void> {
   if (!("fonts" in document)) return
   try {
     await Promise.all([
-      document.fonts.load('800 24px "Fraunces"'),
-      document.fonts.load('900 48px "Fraunces"'),
+      document.fonts.load('900 23px "Fraunces"'),
+      document.fonts.load('800 48px "Fraunces"'),
       document.fonts.load('700 12px "Archivo"'),
       document.fonts.load('400 14px "Archivo"'),
     ])
@@ -75,6 +140,15 @@ async function ensureBrandFontsLoaded(): Promise<void> {
   } catch {
     // Fall back to system fonts rather than failing the export.
   }
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = reject
+    img.src = src
+  })
 }
 
 function triggerDownload(dataUrl: string, filename: string): void {

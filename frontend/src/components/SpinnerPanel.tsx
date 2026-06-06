@@ -18,6 +18,7 @@ import {
   isAutoRespin,
   PlayerPoolEntry,
 } from "@/lib/draft"
+import { getTeamColor, getTeamLogoUrlByAbbr, withAlpha } from "@/lib/teamColors"
 import { cn } from "@/lib/utils"
 import { Kicker } from "@/components/editorial"
 import { Button } from "@/components/ui/button"
@@ -27,6 +28,7 @@ export interface SpinResult {
   eraLabel: string
   franchiseId: string
   franchiseName: string
+  franchiseAbbr: string
   comboKey: string
   players: PlayerPoolEntry[]
 }
@@ -40,15 +42,15 @@ interface SpinnerPanelProps {
   seenComboKeys: Set<string>
   /** Cumulative seen-player ids passed as the pool exclude list. */
   excludeIds: number[]
-  /** Disables the spin trigger while a pool is open awaiting a pick. */
+  /** Disables the draw trigger while a pool is open awaiting a pick. */
   disabled: boolean
   onSpinStart: () => void
   onResolved: (result: SpinResult) => void
   onError: (message: string) => void
 }
 
-// Names shown only while the franchise reel is flickering (cosmetic); the
-// resolved franchise always comes from the API.
+// Cosmetic franchise names cycled during the build-up flicker (the resolved
+// franchise always comes from the API).
 const FRANCHISE_REEL = [
   "Celtics",
   "Lakers",
@@ -62,15 +64,21 @@ const FRANCHISE_REEL = [
   "SuperSonics",
   "Suns",
   "Heat",
+  "Nuggets",
+  "Bucks",
 ]
-
-const FLICKER_MS = 70
-const MIN_SPIN_MS = 750
-// Bound the resolve loop so a fully-exhausted combo space can't spin forever.
-const MAX_SPIN_ATTEMPTS = 80
+// A decelerating reel that lands on the result — fast frames easing into slow
+// ones so the reveal arrives with a beat of anticipation (~0.45s total).
+const REVEAL_FRAMES = [40, 55, 75, 105, 150]
+// Bound the resolve loop so a fully-exhausted combo space can't draw forever.
+const MAX_DRAW_ATTEMPTS = 80
 
 function randomOf<T>(items: T[]): T {
   return items[Math.floor(Math.random() * items.length)]
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms))
 }
 
 function prefersReducedMotion(): boolean {
@@ -81,10 +89,11 @@ function prefersReducedMotion(): boolean {
 }
 
 /**
- * SpinnerPanel — the era + franchise selectors. On a spin it resolves both to a
- * random valid combination (excluding combos already seen this session),
- * fetches the player pool with the session exclude list, transparently
- * re-spins on an auto_respin signal, and surfaces the resolved pool upward.
+ * SpinnerPanel — the era + franchise draw, presented as a hero "draft lottery"
+ * band. A draw resolves both to a random valid unseen combination, fetches the
+ * pool with the session exclude list, and transparently re-draws on auto_respin.
+ * The reveal builds with a quick decelerating flicker that slams onto the
+ * result with the team color flooding in — luck-and-payoff, not a casino reel.
  */
 export const SpinnerPanel = forwardRef<SpinnerHandle, SpinnerPanelProps>(
   function SpinnerPanel(
@@ -92,16 +101,14 @@ export const SpinnerPanel = forwardRef<SpinnerHandle, SpinnerPanelProps>(
     ref
   ) {
     const [eras, setEras] = useState<DraftEra[]>([])
-    const [spinning, setSpinning] = useState(false)
-    const [eraDisplay, setEraDisplay] = useState<string>("—")
-    const [franchiseDisplay, setFranchiseDisplay] = useState<string>("—")
-    const [resolved, setResolved] = useState(false)
+    const [drawing, setDrawing] = useState(false)
+    const [drawn, setDrawn] = useState<SpinResult | null>(null)
+    // Cycling text shown during the build-up flicker.
+    const [flicker, setFlicker] = useState<{ era: string; franchise: string } | null>(
+      null
+    )
 
-    // Per-era franchise cache so repeated spins don't refetch the same list.
     const franchiseCache = useRef<Map<string, DraftFranchise[]>>(new Map())
-    const flickerTimer = useRef<ReturnType<typeof setInterval> | null>(null)
-    // Latest props captured in a ref so the imperative spin() always reads
-    // current values without being re-created (and re-flickering) each render.
     const latest = useRef({ seenComboKeys, excludeIds, eras })
     latest.current = { seenComboKeys, excludeIds, eras }
 
@@ -119,12 +126,6 @@ export const SpinnerPanel = forwardRef<SpinnerHandle, SpinnerPanelProps>(
       }
     }, [onError])
 
-    useEffect(() => {
-      return () => {
-        if (flickerTimer.current) clearInterval(flickerTimer.current)
-      }
-    }, [])
-
     const getFranchises = useCallback(
       async (eraId: string): Promise<DraftFranchise[]> => {
         const cached = franchiseCache.current.get(eraId)
@@ -136,144 +137,260 @@ export const SpinnerPanel = forwardRef<SpinnerHandle, SpinnerPanelProps>(
       []
     )
 
-    const startFlicker = useCallback((eraList: DraftEra[]) => {
-      if (prefersReducedMotion()) return
-      flickerTimer.current = setInterval(() => {
-        setEraDisplay(randomOf(eraList).label)
-        setFranchiseDisplay(randomOf(FRANCHISE_REEL))
-      }, FLICKER_MS)
-    }, [])
-
-    const stopFlicker = useCallback(() => {
-      if (flickerTimer.current) {
-        clearInterval(flickerTimer.current)
-        flickerTimer.current = null
+    // Resolve a random unseen combo whose pool isn't depleted; null on failure.
+    const resolve = useCallback(async (): Promise<SpinResult | null> => {
+      const { eras: eraList } = latest.current
+      const dead = new Set<string>(latest.current.seenComboKeys)
+      for (let attempt = 0; attempt < MAX_DRAW_ATTEMPTS; attempt++) {
+        const era = randomOf(eraList)
+        const franchises = await getFranchises(era.id)
+        if (franchises.length === 0) continue
+        const franchise = randomOf(franchises)
+        const key = comboKey(era.id, franchise.id)
+        if (dead.has(key)) continue
+        const pool = await fetchPool(era.id, franchise.id, latest.current.excludeIds)
+        if (isAutoRespin(pool)) {
+          dead.add(key)
+          continue
+        }
+        return {
+          eraId: era.id,
+          eraLabel: era.label,
+          franchiseId: franchise.id,
+          franchiseName: franchise.name,
+          franchiseAbbr: franchise.abbreviation,
+          comboKey: key,
+          players: pool.players,
+        }
       }
-    }, [])
+      return null
+    }, [getFranchises])
 
     const runSpin = useCallback(async () => {
       const { eras: eraList } = latest.current
-      if (spinning || eraList.length === 0) return
+      if (drawing || eraList.length === 0) return
 
-      setSpinning(true)
-      setResolved(false)
+      setDrawing(true)
+      setDrawn(null)
       onSpinStart()
-      startFlicker(eraList)
-      const startedAt = Date.now()
 
-      // Combos found dead this spin (already seen, or auto_respin) so we don't
-      // reselect them within the same resolve loop.
-      const dead = new Set<string>(latest.current.seenComboKeys)
-      try {
-        for (let attempt = 0; attempt < MAX_SPIN_ATTEMPTS; attempt++) {
-          const era = randomOf(eraList)
-          const franchises = await getFranchises(era.id)
-          if (franchises.length === 0) continue
-          const franchise = randomOf(franchises)
-          const key = comboKey(era.id, franchise.id)
-          if (dead.has(key)) continue
+      const exhausted =
+        "You've drafted from every era-franchise combo — start over to go again."
+      const failed = "The draw failed to resolve. Try again."
 
-          const pool = await fetchPool(
-            era.id,
-            franchise.id,
-            latest.current.excludeIds
-          )
-          if (isAutoRespin(pool)) {
-            // Too few players left for this combo — burn it and keep spinning.
-            dead.add(key)
-            continue
+      // Reduced motion: skip the flicker, just resolve and land.
+      if (prefersReducedMotion()) {
+        try {
+          const result = await resolve()
+          if (!result) {
+            setDrawing(false)
+            onError(exhausted)
+            return
           }
-
-          // Hold the spin animation for a minimum beat so it reads as a spin.
-          const elapsed = Date.now() - startedAt
-          if (elapsed < MIN_SPIN_MS && !prefersReducedMotion()) {
-            await new Promise((r) => setTimeout(r, MIN_SPIN_MS - elapsed))
-          }
-          stopFlicker()
-          setEraDisplay(era.label)
-          setFranchiseDisplay(franchise.name)
-          setResolved(true)
-          setSpinning(false)
-          onResolved({
-            eraId: era.id,
-            eraLabel: era.label,
-            franchiseId: franchise.id,
-            franchiseName: franchise.name,
-            comboKey: key,
-            players: pool.players,
-          })
-          return
+          setDrawn(result)
+          setDrawing(false)
+          onResolved(result)
+        } catch {
+          setDrawing(false)
+          onError(failed)
         }
-        // Loop exhausted: effectively every combo is seen or depleted.
-        stopFlicker()
-        setSpinning(false)
-        onError("You've drafted from every era-franchise combo — start over to go again.")
-      } catch {
-        stopFlicker()
-        setSpinning(false)
-        onError("The spin failed to resolve. Try again.")
+        return
       }
-    }, [spinning, getFranchises, onResolved, onError, onSpinStart, startFlicker, stopFlicker])
+
+      // Start the fetch and the flicker animation at the SAME time, so the spin
+      // is visible instantly rather than waiting on the network.
+      let result: SpinResult | null = null
+      let errored = false
+      let settled = false
+      void resolve()
+        .then((r) => {
+          result = r
+        })
+        .catch(() => {
+          errored = true
+        })
+        .finally(() => {
+          settled = true
+        })
+
+      // Spin fast right away; keep cycling until the fetch settles and a minimum
+      // beat has elapsed.
+      const startedAt = Date.now()
+      const MIN_SPIN_MS = 300
+      while (!settled || Date.now() - startedAt < MIN_SPIN_MS) {
+        setFlicker({
+          era: randomOf(eraList).label,
+          franchise: randomOf(FRANCHISE_REEL),
+        })
+        await sleep(55)
+      }
+
+      if (errored || !result) {
+        setDrawing(false)
+        setFlicker(null)
+        onError(errored ? failed : exhausted)
+        return
+      }
+
+      // Decelerate into the landing.
+      for (const ms of REVEAL_FRAMES) {
+        setFlicker({
+          era: randomOf(eraList).label,
+          franchise: randomOf(FRANCHISE_REEL),
+        })
+        await sleep(ms)
+      }
+
+      setFlicker(null)
+      setDrawn(result)
+      setDrawing(false)
+      onResolved(result)
+    }, [drawing, resolve, onResolved, onError, onSpinStart])
 
     useImperativeHandle(ref, () => ({ spin: runSpin }), [runSpin])
 
+    const teamColor = drawn ? getTeamColor(drawn.franchiseAbbr) : null
+
     return (
-      <div className="flex flex-col gap-4">
-        <div className="grid grid-cols-2 gap-3">
-          <Reel label="Era" value={eraDisplay} spinning={spinning} resolved={resolved} />
-          <Reel
-            label="Franchise"
-            value={franchiseDisplay}
-            spinning={spinning}
-            resolved={resolved}
-          />
+      <div
+        className="relative overflow-hidden rounded-sm border bg-card p-5 transition-colors duration-500 sm:p-6"
+        style={
+          drawn && teamColor
+            ? { backgroundColor: withAlpha(teamColor, 0.06) }
+            : undefined
+        }
+      >
+        {/* Offset-print halftone tone — the ISO Lab card treatment: a fine dot
+            field bleeding from the top-right corner, neutral until a team is
+            drawn, then flooded with the team's color. */}
+        <span
+          aria-hidden
+          className="halftone-splash pointer-events-none absolute inset-0 transition-[background] duration-500"
+          style={
+            {
+              backgroundImage:
+                "radial-gradient(var(--splash-dot) 1.4px, transparent 1.9px)",
+              backgroundSize: "9px 9px",
+              ...(drawn && teamColor
+                ? { "--splash-dot": withAlpha(teamColor, 0.2) }
+                : {}),
+            } as React.CSSProperties
+          }
+        />
+
+        <div className="relative flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          {/* Identity row: the mark + the draw headline. */}
+          <div className="flex min-w-0 items-center gap-4">
+            <DrawMark drawing={drawing} drawn={drawn} />
+            <div className="min-w-0">
+              <Kicker ruled tone={drawn ? "primary" : "muted"}>The Draw</Kicker>
+              {drawing && flicker ? (
+                // The franchise AND the era both spin during the build-up,
+                // landing together in the same layout as the resolved draw.
+                <div className="mt-1 flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+                  <p className="display text-3xl leading-none text-foreground/80 sm:text-4xl">
+                    {flicker.franchise}
+                  </p>
+                  <span className="kicker text-muted-foreground/80">
+                    {flicker.era}
+                  </span>
+                </div>
+              ) : drawing ? (
+                <p className="display mt-1 text-3xl leading-none text-foreground/80 sm:text-4xl">
+                  Drawing the lot…
+                </p>
+              ) : drawn ? (
+                <div
+                  key={drawn.comboKey}
+                  className="mt-1 flex flex-wrap items-baseline gap-x-2.5 gap-y-1 duration-300 animate-in fade-in zoom-in-90"
+                >
+                  <p className="display text-3xl leading-none text-primary sm:text-4xl">
+                    {drawn.franchiseName}
+                  </p>
+                  <span className="kicker text-muted-foreground">
+                    {drawn.eraLabel}
+                  </span>
+                </div>
+              ) : (
+                <p className="display mt-1 text-3xl leading-none sm:text-4xl">
+                  Who's on the clock?
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* The draw CTA, inline to the right of the headline. */}
+          <Button
+            onClick={runSpin}
+            disabled={disabled || drawing || eras.length === 0}
+            className="shrink-0 font-condensed font-bold uppercase tracking-[0.14em]"
+          >
+            {drawing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Dices className="h-4 w-4" />
+            )}
+            {drawing ? "Drawing…" : drawn ? "Draw again" : "Draw a team"}
+          </Button>
         </div>
-        <Button
-          onClick={runSpin}
-          disabled={disabled || spinning || eras.length === 0}
-          size="lg"
-          className="font-condensed font-bold uppercase tracking-[0.14em]"
-        >
-          {spinning ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Dices className="h-4 w-4" />
-          )}
-          {spinning ? "Spinning…" : "Spin to draft"}
-        </Button>
       </div>
     )
   }
 )
 
-function Reel({
-  label,
-  value,
-  spinning,
-  resolved,
+// The mark to the left of the draw text: the franchise logo/monogram once
+// drawn, a flicker placeholder while drawing, or the dice when idle.
+function DrawMark({
+  drawing,
+  drawn,
 }: {
-  label: string
-  value: string
-  spinning: boolean
-  resolved: boolean
+  drawing: boolean
+  drawn: SpinResult | null
 }) {
+  if (drawn && !drawing) return <TeamMark abbr={drawn.franchiseAbbr} />
+  // While drawing, the dice rolls (pulses) rather than adding a second spinner —
+  // the reel flicker + the button spinner are the only motion the draw needs.
   return (
-    <div
-      className={cn(
-        "flex flex-col items-center gap-1.5 rounded-sm border bg-card px-3 py-4 text-center transition-colors",
-        resolved && !spinning && "border-primary"
-      )}
-    >
-      <Kicker tone="muted">{label}</Kicker>
-      <span
+    <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-sm border bg-background">
+      <Dices
         className={cn(
-          "display text-2xl leading-tight sm:text-3xl",
-          spinning && "tabular-nums opacity-70 blur-[0.4px]",
-          resolved && !spinning && "text-primary"
+          "h-6 w-6 text-muted-foreground",
+          drawing && "animate-pulse text-primary"
         )}
-      >
-        {value}
+      />
+    </span>
+  )
+}
+
+// Muted team identity: the current franchise logo where one exists, otherwise a
+// team-colored abbreviation monogram (relocated/historical identities).
+function TeamMark({ abbr }: { abbr: string }) {
+  const logo = getTeamLogoUrlByAbbr(abbr)
+  const color = getTeamColor(abbr)
+
+  if (logo) {
+    return (
+      <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-sm border bg-background duration-300 animate-in zoom-in-90">
+        <img
+          src={logo}
+          alt=""
+          aria-hidden
+          className="h-11 w-11 object-contain"
+          style={{ filter: "grayscale(0.55) contrast(1.05)", opacity: 0.92 }}
+        />
       </span>
-    </div>
+    )
+  }
+
+  return (
+    <span
+      className={cn(
+        "flex h-14 w-14 shrink-0 items-center justify-center rounded-sm border bg-background duration-300 animate-in zoom-in-90",
+        "font-display text-base font-black tabular-nums"
+      )}
+      style={color ? { color, borderColor: withAlpha(color, 0.5) } : undefined}
+    >
+      {abbr}
+    </span>
   )
 }

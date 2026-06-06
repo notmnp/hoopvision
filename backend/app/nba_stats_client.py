@@ -23,8 +23,13 @@ NBA_STATS_RETRIES = int(os.getenv("NBA_STATS_RETRIES", "2"))
 NBA_STATS_RETRY_BACKOFF_SECONDS = float(
     os.getenv("NBA_STATS_RETRY_BACKOFF_SECONDS", "0.75")
 )
+# Minimum spacing between NBA-Stats request *starts* (the throttle releases its
+# lock before the network call, so calls still overlap — this only gates how
+# fast new ones launch). The draft pool fans out one cached career-totals read
+# per capped player; 0.5s (2 starts/sec) keeps that gentle enough to avoid
+# stats.nba.com rate-limiting while a bounded thread pool overlaps their latency.
 NBA_STATS_MIN_REQUEST_INTERVAL_SECONDS = float(
-    os.getenv("NBA_STATS_MIN_REQUEST_INTERVAL_SECONDS", "1.0")
+    os.getenv("NBA_STATS_MIN_REQUEST_INTERVAL_SECONDS", "0.5")
 )
 # 7 days: NBA Stats data is effectively immutable for past seasons (career
 # totals, shot charts), so a long TTL maximizes cache hits and minimizes proxy

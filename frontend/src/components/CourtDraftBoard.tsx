@@ -1,9 +1,22 @@
-// CourtDraftBoard (WO-52) — a half-court SVG with five fixed positional slots.
-// Selecting a player in PlayerPoolPanel highlights every open slot they're
-// eligible for; tapping a highlighted slot confirms the placement. Lineup
-// completion is derived by DraftWorkspace once the fifth slot fills.
-import { DraftSlot, PlayerPoolEntry, PositionSlot, eligibleOpenSlots } from "@/lib/draft"
+// The drafted lineup, as an editorial "Starting Five" roster card (WO-52).
+//
+// Deliberately NOT a basketball-court diagram: DESIGN.md bans the literal
+// court-line backdrop as the #1 AI-sports cliché. Instead this is an almanac
+// depth-chart — five position rows, hairline-separated, each an empty slot or a
+// printed (duotone) headshot with the player's name and the era/franchise they
+// were drawn from. Selecting a player highlights every open row they're
+// eligible for; tapping a highlighted row confirms the placement.
+import {
+  DraftSlot,
+  PlayerPoolEntry,
+  POSITION_LABEL,
+  PositionSlot,
+  eligibleOpenSlots,
+  headshotUrl,
+} from "@/lib/draft"
+import { getTeamColor } from "@/lib/teamColors"
 import { cn } from "@/lib/utils"
+import { HalftoneAvatar, Kicker, Rule } from "@/components/editorial"
 
 interface CourtDraftBoardProps {
   lineup: DraftSlot[]
@@ -11,79 +24,52 @@ interface CourtDraftBoardProps {
   onPlace: (position: PositionSlot, player: PlayerPoolEntry) => void
 }
 
-// Fixed slot coordinates within the 500×470 half-court (basket at top center):
-// PG at the top of the key, SG/SF on the right/left wings, PF/C flanking the
-// paint near the basket.
-const SLOT_POSITIONS: Record<PositionSlot, { x: number; y: number }> = {
-  C: { x: 150, y: 112 },
-  PF: { x: 350, y: 112 },
-  SF: { x: 92, y: 250 },
-  SG: { x: 408, y: 250 },
-  PG: { x: 250, y: 330 },
-}
-
-const SLOT_RADIUS = 38
-
-function abbreviateName(name: string): { initial: string; surname: string } {
-  const parts = name.trim().split(/\s+/)
-  if (parts.length === 1) return { initial: "", surname: clip(parts[0]) }
-  const surname = parts.slice(1).join(" ")
-  return { initial: `${parts[0][0]}.`, surname: clip(surname) }
-}
-
-function clip(text: string): string {
-  return text.length > 11 ? `${text.slice(0, 10)}…` : text
-}
-
 export function CourtDraftBoard({
   lineup,
   selectedPlayer,
   onPlace,
 }: CourtDraftBoardProps) {
-  const highlighted = selectedPlayer
+  const eligible = selectedPlayer
     ? new Set(eligibleOpenSlots(lineup, selectedPlayer))
     : new Set<PositionSlot>()
+  const filled = lineup.filter((slot) => slot.pick !== null).length
 
   return (
-    <div className="flex flex-col rounded-sm border bg-card p-4">
-      <svg
-        viewBox="0 0 500 470"
-        className="h-auto w-full"
-        role="group"
-        aria-label="Draft court — five positional slots"
+    <div className="relative flex flex-col overflow-hidden rounded-sm border bg-card p-4 sm:p-5">
+      {/* Faint oversized watermark for editorial atmosphere — never court lines. */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute -right-4 bottom-0 select-none font-display text-[9rem] font-black italic leading-none text-foreground/[0.04]"
       >
-        {/* Court markings (decorative). */}
-        <g fill="none" className="stroke-foreground/25" strokeWidth={2}>
-          <rect x={12} y={12} width={476} height={446} rx={4} />
-          {/* Paint / key, from the baseline down to the free-throw line. */}
-          <rect x={180} y={12} width={140} height={188} />
-          {/* Free-throw circle. */}
-          <circle cx={250} cy={200} r={58} />
-          {/* Three-point line: corner segments + arc around the basket. */}
-          <path d="M40 12 L40 160 A237 237 0 0 0 460 160 L460 12" />
-          {/* Backboard + rim. */}
-          <line x1={214} y1={46} x2={286} y2={46} />
-          <circle cx={250} cy={56} r={9} />
-        </g>
+        5
+      </span>
 
+      <div className="relative mb-3 flex items-center justify-between">
+        <Kicker ruled>Starting Five</Kicker>
+        <span className="kicker tabular-nums text-muted-foreground">
+          {filled} / 5
+        </span>
+      </div>
+
+      <div className="relative divide-y divide-border overflow-hidden rounded-sm border">
         {lineup.map((slot) => (
-          <SlotMarker
+          <LineupRow
             key={slot.position}
             slot={slot}
-            highlighted={highlighted.has(slot.position)}
+            highlighted={eligible.has(slot.position)}
             onPlace={() =>
               selectedPlayer &&
-              highlighted.has(slot.position) &&
+              eligible.has(slot.position) &&
               onPlace(slot.position, selectedPlayer)
             }
           />
         ))}
-      </svg>
+      </div>
     </div>
   )
 }
 
-function SlotMarker({
+function LineupRow({
   slot,
   highlighted,
   onPlace,
@@ -92,85 +78,73 @@ function SlotMarker({
   highlighted: boolean
   onPlace: () => void
 }) {
-  const { x, y } = SLOT_POSITIONS[slot.position]
-  const filled = slot.pick !== null
-  const name = filled ? abbreviateName(slot.pick!.player.name) : null
+  const pick = slot.pick
+  const teamColor = pick ? getTeamColor(pick.franchiseAbbr) : null
 
   return (
-    <g
-      transform={`translate(${x} ${y})`}
-      role={highlighted ? "button" : undefined}
-      tabIndex={highlighted ? 0 : undefined}
+    <button
+      type="button"
+      disabled={!highlighted}
       aria-label={
         highlighted
-          ? `Place at ${slot.position}`
-          : filled
-            ? `${slot.position}: ${slot.pick!.player.name}`
-            : `${slot.position} (empty)`
+          ? `Place selected player at ${slot.position}`
+          : pick
+            ? `${slot.position}: ${pick.player.name}`
+            : `${slot.position} — empty`
       }
       onClick={onPlace}
-      onKeyDown={(event) => {
-        if (highlighted && (event.key === "Enter" || event.key === " ")) {
-          event.preventDefault()
-          onPlace()
-        }
-      }}
       className={cn(
-        "outline-none",
-        highlighted && "cursor-pointer [&_circle]:animate-pulse"
+        // Fixed row height so an empty slot is the same height as a filled one
+        // (40px headshot + padding) — placing a player never restretches the row.
+        "flex min-h-[3.75rem] w-full items-center gap-3 px-3 py-2.5 text-left transition-colors",
+        highlighted
+          ? "cursor-pointer bg-primary/10 hover:bg-primary/15"
+          : "cursor-default"
       )}
     >
-      <circle
-        r={SLOT_RADIUS}
-        className={cn(
-          "transition-colors",
-          highlighted
-            ? "fill-primary/15 stroke-primary"
-            : filled
-              ? "fill-secondary stroke-foreground/40"
-              : "fill-background stroke-foreground/30"
-        )}
-        strokeWidth={highlighted ? 3 : 2}
-      />
-      {filled ? (
+      {pick ? (
+        // Filled slot: just the player — printed headshot, name, where they came
+        // from. No position acronym (the slot is settled).
         <>
-          {name!.initial && (
-            <text
-              textAnchor="middle"
-              y={-6}
-              className="fill-muted-foreground"
-              style={{ fontSize: 11, fontWeight: 700 }}
-            >
-              {name!.initial}
-            </text>
-          )}
-          <text
-            textAnchor="middle"
-            y={name!.initial ? 9 : 4}
-            className="fill-foreground"
-            style={{ fontSize: 12, fontWeight: 600 }}
-          >
-            {name!.surname}
-          </text>
-          <text
-            textAnchor="middle"
-            y={24}
-            className="fill-muted-foreground"
-            style={{ fontSize: 8, fontWeight: 700, letterSpacing: "0.08em" }}
-          >
-            {slot.position}
-          </text>
+          <HalftoneAvatar
+            src={headshotUrl(pick.player.player_id)}
+            alt={pick.player.name}
+            size={40}
+            active
+            accent={teamColor ?? undefined}
+            className="rounded-sm"
+          />
+          <div className="min-w-0 flex-1">
+            <span className="block truncate font-display text-sm font-semibold leading-tight">
+              {pick.player.name}
+            </span>
+            <span className="kicker text-muted-foreground">
+              {pick.eraLabel} · {pick.franchiseName}
+            </span>
+          </div>
         </>
       ) : (
-        <text
-          textAnchor="middle"
-          y={6}
-          className={highlighted ? "fill-primary" : "fill-muted-foreground"}
-          style={{ fontSize: 17, fontWeight: 800, letterSpacing: "0.04em" }}
-        >
-          {slot.position}
-        </text>
+        // Open slot: the position rail + label.
+        <>
+          <span
+            className={cn(
+              "w-8 shrink-0 font-display text-2xl font-black leading-none tabular-nums",
+              highlighted ? "text-primary" : "text-muted-foreground/45"
+            )}
+          >
+            {slot.position}
+          </span>
+          <Rule vertical className="self-stretch" />
+          <span
+            className={cn(
+              "kicker",
+              highlighted ? "text-primary" : "text-muted-foreground/70"
+            )}
+          >
+            {highlighted ? "Tap to place" : POSITION_LABEL[slot.position]}
+          </span>
+        </>
       )}
-    </g>
+    </button>
   )
 }

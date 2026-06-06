@@ -9,7 +9,6 @@ from backend.app import api
 from backend.app import draft_eras
 from backend.app.draft import (
     MIN_VIABLE_POOL,
-    POOL_SIZE,
     AutoRespin,
     PlayerPool,
     PlayerPoolResolver,
@@ -30,6 +29,8 @@ FAKE_CSV = """player_id,player_name,season_id,pos,teams,mp,ws_per_48,bpm,vorp,ts
 5,Thunder Star,2012-13,SG,OKC,2900,0.210,7.0,6.5,0.605
 6,Traded Vet,1996-97,SF,PHI;CHI,2000,0.120,1.0,1.0,0.540
 7,Bench Cog,1996-97,PG,CHI,1600,0.080,-1.0,0.2,0.500
+10,Swing Man,1994-95,SG,CHI,2200,0.140,2.0,2.0,0.550
+10,Swing Man,1996-97,PG,CHI,2300,0.160,2.5,2.5,0.555
 """
 
 
@@ -103,6 +104,16 @@ class ResolvePoolTest(unittest.TestCase):
         pool = _make_resolver().resolve_pool("1990s", "bulls", exclude_ids={1})
         ids = {p.player_id for p in pool.players}
         self.assertNotIn(1, ids)
+
+    def test_positions_union_across_seasons(self):
+        # Player 10 played SG (1994-95) then PG (1996-97, the peak) for the same
+        # franchise in the same era; eligibility must span BOTH slots, not just
+        # the peak season's PG — ordered canonically PG before SG.
+        pool = _make_resolver().resolve_pool("1990s", "bulls")
+        by_id = {p.player_id: p for p in pool.players}
+        self.assertEqual(by_id[10].positions, ["PG", "SG"])
+        # A genuinely single-position player stays single.
+        self.assertEqual(by_id[3].positions, ["C"])
 
     def test_trade_team_membership_matches_franchise(self):
         pool = _make_resolver().resolve_pool("1990s", "bulls")
@@ -181,8 +192,10 @@ class DraftEndpointsTest(unittest.TestCase):
         body = response.json()
         self.assertEqual(body["era"], "1990s")
         self.assertEqual(body["franchise"], "bulls")
-        self.assertLessEqual(len(body["players"]), POOL_SIZE)
-        # Jordan (893) was the Bulls' peak-WS/48 player of the 1990s.
+        # The pool is unrestricted: every eligible Bulls-90s player is surfaced.
+        self.assertGreater(len(body["players"]), 0)
+        # With a flat per-game stub, PPG ties resolve on WS/48 — Jordan (893)
+        # was the Bulls' peak-WS/48 player of the 1990s, so he leads.
         self.assertEqual(body["players"][0]["player_id"], 893)
         entry = body["players"][0]
         self.assertIn("positions", entry)

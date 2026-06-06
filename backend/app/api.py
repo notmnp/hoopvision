@@ -852,8 +852,12 @@ async def get_draft_franchises(era: str) -> dict:
 
 
 @router.get("/draft/pool", tags=["draft"])
-async def get_draft_pool(era: str, franchise_id: str, exclude: str = ""):
-    # `exclude` is the client's cumulative seen-player list (cross-spin
+def get_draft_pool(era: str, franchise_id: str, exclude: str = ""):
+    # Deliberately a SYNC def: resolve_pool does blocking, best-effort per-game
+    # stat lookups (and fans them out across a thread pool). FastAPI runs sync
+    # path operations in its worker threadpool, so this never blocks the event
+    # loop — an async def here would freeze the whole server for the draw's
+    # duration. `exclude` is the client's cumulative seen-player list (cross-spin
     # deduplication, AC-ATD-008.2); silently ignore any non-integer tokens.
     exclude_ids = {
         int(token)

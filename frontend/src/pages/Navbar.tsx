@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils"
 const NAV_ITEMS = [
   { to: "/simulate", label: "Simulate a 1v1" },
   { to: "/bracket", label: "Create a Bracket" },
-  { to: "/draft", label: "All-Time Draft" },
+  { to: "/draft", label: "82-0 Draft" },
   { to: "/live", label: "Live Scores" },
 ]
 
