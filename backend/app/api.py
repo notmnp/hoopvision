@@ -24,6 +24,7 @@ from .nba_stats_client import (
 from .player_data import get_player_season_stats, list_player_seasons
 from .draft import PlayerPoolResolver
 from .draft_eras import get_era, list_eras, list_franchises_for_era
+from .draft_scoring import DraftLineup, DraftLineupError, DraftScore, DraftScoringEngine
 from .simulation import SimulationEngine
 from .bracket import (
     BracketConfig,
@@ -865,6 +866,21 @@ async def get_draft_pool(era: str, franchise_id: str, exclude: str = ""):
             status_code=404, detail="Unknown era or franchise for the draft pool"
         )
     return result
+
+
+# TS% comes from PlayerDataService basic stats when reachable, falling back to
+# the bundled CSV's TS% so scoring stays deterministic and offline-capable.
+draft_scoring_engine = DraftScoringEngine(
+    season_stats_provider=get_player_season_stats
+)
+
+
+@router.post("/draft/score", tags=["draft"], response_model=DraftScore)
+async def score_draft_lineup(lineup: DraftLineup):
+    try:
+        return draft_scoring_engine.score(lineup)
+    except DraftLineupError as error:
+        raise HTTPException(status_code=400, detail=str(error))
 
 
 # Mount every /api route once the router is fully populated.
