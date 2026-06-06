@@ -184,6 +184,7 @@ export function HalftoneAvatar({
   accent,
   active = false,
   revealOnGroupHover = false,
+  crossOrigin,
   className,
 }: {
   src?: string
@@ -195,6 +196,9 @@ export function HalftoneAvatar({
   /** Un-desaturate (and accent the border) when the nearest `.group` ancestor
    *  is hovered — e.g. a list row that should "light up" its players on hover. */
   revealOnGroupHover?: boolean
+  /** Set "anonymous" so a proxied headshot can be read by an html2canvas export
+   *  without tainting the canvas (ADR-004). */
+  crossOrigin?: "anonymous" | "use-credentials"
   className?: string
 }) {
   const [errored, setErrored] = React.useState(false)
@@ -218,6 +222,7 @@ export function HalftoneAvatar({
         <img
           src={src}
           alt={alt}
+          crossOrigin={crossOrigin}
           onError={() => setErrored(true)}
           className={cn(
             "relative h-full w-full object-cover object-top transition-all duration-300",
