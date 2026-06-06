@@ -22,6 +22,8 @@ from .nba_stats_client import (
     nba_stats_proxy,
 )
 from .player_data import get_player_season_stats, list_player_seasons
+from .draft import PlayerPoolResolver
+from .draft_eras import get_era, list_eras, list_franchises_for_era
 from .simulation import SimulationEngine
 from .bracket import (
     BracketConfig,
@@ -821,6 +823,48 @@ async def run_bracket_all(bracket_id: str):
         )
     await _kv_save_bracket(bracket_id, state, possession_mode)
     return state
+
+
+# --- All-Time Draft Challenge ---------------------------------------------
+#
+# Stateless pool resolution (ADR-002): the server holds no draft session. The
+# resolver lazy-loads the bundled advanced-stats CSV once and layers PPG/APG/RPG
+# from PlayerDataService onto each pool entry at request time.
+player_pool_resolver = PlayerPoolResolver(
+    season_stats_provider=get_player_season_stats
+)
+
+
+@router.get("/draft/eras", tags=["draft"])
+async def get_draft_eras() -> dict:
+    # Static era list (ADR-003) the client renders the era spinner from.
+    return {"eras": list_eras()}
+
+
+@router.get("/draft/franchises", tags=["draft"])
+async def get_draft_franchises(era: str) -> dict:
+    # Only franchises that fielded a team during the era, named for that era
+    # (e.g. "Seattle SuperSonics" in the 1990s, "Oklahoma City Thunder" later).
+    if get_era(era) is None:
+        raise HTTPException(status_code=400, detail=f"Unknown era: {era}")
+    return {"franchises": list_franchises_for_era(era)}
+
+
+@router.get("/draft/pool", tags=["draft"])
+async def get_draft_pool(era: str, franchise_id: str, exclude: str = ""):
+    # `exclude` is the client's cumulative seen-player list (cross-spin
+    # deduplication, AC-ATD-008.2); silently ignore any non-integer tokens.
+    exclude_ids = {
+        int(token)
+        for token in exclude.split(",")
+        if token.strip().lstrip("-").isdigit()
+    }
+    result = player_pool_resolver.resolve_pool(era, franchise_id, exclude_ids)
+    if result is None:
+        raise HTTPException(
+            status_code=404, detail="Unknown era or franchise for the draft pool"
+        )
+    return result
 
 
 # Mount every /api route once the router is fully populated.
