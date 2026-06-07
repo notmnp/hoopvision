@@ -45,7 +45,7 @@ export interface SpinnerHandle {
 interface SpinnerPanelProps {
   /** Era-franchise combo keys already spun this session (excluded). */
   seenComboKeys: Set<string>
-  /** Cumulative seen-player ids passed as the pool exclude list. */
+  /** Cumulative drafted-player ids passed as the pool exclude list. */
   excludeIds: number[]
   /** Disables the draw trigger while a pool is open awaiting a pick. */
   disabled: boolean

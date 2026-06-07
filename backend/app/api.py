@@ -857,8 +857,8 @@ def get_draft_pool(era: str, franchise_id: str, exclude: str = ""):
     # stat lookups (and fans them out across a thread pool). FastAPI runs sync
     # path operations in its worker threadpool, so this never blocks the event
     # loop — an async def here would freeze the whole server for the draw's
-    # duration. `exclude` is the client's cumulative seen-player list (cross-spin
-    # deduplication, AC-ATD-008.2); silently ignore any non-integer tokens.
+    # duration. `exclude` is the client's cumulative drafted-player list (a player
+    # is retired only once picked, AC-ATD-008.2); silently ignore non-integer tokens.
     exclude_ids = {
         int(token)
         for token in exclude.split(",")

@@ -27,8 +27,9 @@ type DraftPhase = "idle" | "spinning" | "placement" | "result"
 
 /**
  * DraftWorkspace — owner of the entire client-side draft session (ADR-002). It
- * holds the lineup, the spin-history (seen era-franchise combos) and seen-player
- * exclusion sets, mediates selection between PlayerPoolPanel and CourtDraftBoard,
+ * holds the lineup, the spin-history (seen era-franchise combos) and the
+ * drafted-player exclusion set, mediates selection between PlayerPoolPanel and
+ * CourtDraftBoard,
  * and on completion POSTs the lineup to /draft/score. No server session exists;
  * a refresh restarts the draft.
  */
@@ -66,13 +67,11 @@ export default function DraftWorkspace() {
   }, [])
 
   const handleResolved = useCallback((result: SpinResult) => {
-    // Record the combo + every surfaced player so neither repeats this session
-    // (AC-ATD-008.1 / AC-ATD-008.2).
+    // Record only the combo so the same era+franchise never repeats this session
+    // (AC-ATD-008.1). Players are NOT excluded on sight — merely surfacing a
+    // player leaves them free to reappear (and be drafted) on another combo.
+    // Exclusion happens on pick, in handlePlace.
     setSeenComboKeys((prev) => new Set(prev).add(result.comboKey))
-    setSeenPlayerIds((prev) => [
-      ...prev,
-      ...result.players.map((p) => p.player_id),
-    ])
     setCurrentSpin(result)
     setPool(result.players)
     setSelectedPlayer(null)
@@ -119,6 +118,9 @@ export default function DraftWorkspace() {
             }
           : slot
       )
+      // Only a drafted player is retired from future pools (AC-ATD-008.2) — so
+      // the same person can't be picked twice, while the unpicked stay available.
+      setSeenPlayerIds((prev) => [...prev, player.player_id])
       setLineup(nextLineup)
       setSelectedPlayer(null)
       setPool([])

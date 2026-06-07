@@ -167,7 +167,7 @@ export const sections: SectionDefinition[] = [
       pseudocode: `# Draw phase (stateless; client holds all state, server just answers reads)
 era       = random_unseen(GET /draft/eras)
 franchise = random_unseen(GET /draft/franchises?era=era)
-pool      = GET /draft/pool?era=era&franchise_id=franchise&exclude=seen_ids
+pool      = GET /draft/pool?era=era&franchise_id=franchise&exclude=drafted_ids
 if pool.auto_respin:          # < 3 viable players for the combo
     redraw()                  # spin again, no slot burned
 # pool = top 14 players by WS/48, peak franchise-season within the era window
