@@ -1,7 +1,11 @@
 import unittest
 
 from backend.app.matchup_data import MatchupConditionedStats, ZoneShotData
-from backend.app.tendency_profile import TendencyProfileBuilder
+from backend.app.tendency_profile import (
+    LEAGUE_AVERAGE_ZONE_WEIGHTS,
+    SHOT_LOCATION_FALLBACK_WARNING,
+    TendencyProfileBuilder,
+)
 
 
 class DictModel:
@@ -212,6 +216,81 @@ class TendencyProfileBuilderTest(unittest.TestCase):
         self.assertEqual(profile.matchup_possession_count, 100)
         self.assertEqual(profile.observed_blend_weight, 0.5)
         self.assertGreater(profile.shot_type_distribution["rim"], 0.30)
+
+    def test_shot_zone_weights_built_from_observed_zone_data(self):
+        # The same two observed zones (a Restricted Area shot and an Above the
+        # Break 3) should surface as the rim and three location distributions.
+        matchup_service = StubMatchupService(
+            MatchupConditionedStats(
+                sufficient_sample=True,
+                possession_count=100,
+                fgm=30,
+                fga=60,
+                points=72,
+                free_throw_attempts=18,
+                turnovers=6,
+                blocks=3,
+                zone_data=[
+                    ZoneShotData(
+                        zone="Restricted Area | Center(C) | Less Than 8 ft.",
+                        shot_zone_basic="Restricted Area",
+                        shot_zone_area="Center(C)",
+                        shot_zone_range="Less Than 8 ft.",
+                        fgm=20,
+                        fga=30,
+                        points=40,
+                        frequency=0.5,
+                        field_goal_percentage=0.6667,
+                    ),
+                    ZoneShotData(
+                        zone="Above the Break 3 | Center(C) | 24+ ft.",
+                        shot_zone_basic="Above the Break 3",
+                        shot_zone_area="Center(C)",
+                        shot_zone_range="24+ ft.",
+                        fgm=10,
+                        fga=30,
+                        points=30,
+                        frequency=0.5,
+                        field_goal_percentage=0.3333,
+                    ),
+                ],
+                height_bucket="guard",
+            )
+        )
+        builder = StubbedTendencyProfileBuilder(
+            season_stats("2023-24"),
+            matchup_service=matchup_service,
+        )
+
+        profile = builder.build_profile(
+            player_id=203999, height_bucket="guard", season_id="2023-24"
+        )
+
+        self.assertEqual(
+            profile.shot_zone_weights["rim"],
+            [{"basic": "Restricted Area", "area": "Center(C)", "weight": 30.0}],
+        )
+        self.assertEqual(
+            profile.shot_zone_weights["three"],
+            [{"basic": "Above the Break 3", "area": "Center(C)", "weight": 30.0}],
+        )
+        # No observed mid-range shots, so that band falls back to the league
+        # average — but the overall chart is real, so no fallback warning fires.
+        self.assertEqual(
+            profile.shot_zone_weights["mid_range"],
+            LEAGUE_AVERAGE_ZONE_WEIGHTS["mid_range"],
+        )
+        self.assertNotIn(SHOT_LOCATION_FALLBACK_WARNING, profile.data_warnings)
+
+    def test_shot_zone_weights_fall_back_to_league_average_without_data(self):
+        # A pre-tracking season has no observed shot chart, so every band uses
+        # the league-average split and the substitution is disclosed.
+        builder = StubbedTendencyProfileBuilder(season_stats("1990-91"))
+
+        profile = builder.build_profile(player_id=23, season_id="1990-91")
+
+        self.assertEqual(profile.shot_zone_weights, LEAGUE_AVERAGE_ZONE_WEIGHTS)
+        self.assertIn(SHOT_LOCATION_FALLBACK_WARNING, profile.data_warnings)
 
 
 if __name__ == "__main__":
