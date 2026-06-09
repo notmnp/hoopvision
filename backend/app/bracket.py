@@ -4,8 +4,11 @@
 single-elimination tree from a `BracketConfig`, runs each matchup as a best-of
 series by calling `SimulationEngine` in-process (ADR-001), advances winners
 round-by-round, and holds every `BracketState` in an in-process session store
-keyed by `bracket_id` (ADR-002). State is intentionally not persisted — it is
-lost on process restart.
+keyed by `bracket_id` (ADR-002). The in-process store is a working copy: when
+Vercel KV credentials are configured, `api.py` persists every state mutation to
+KV (`bracket:{bracket_id}`, 24-hour TTL) and rehydrates the store from KV on
+each request, so brackets survive serverless cold starts. Without KV the store
+is the only copy and state is lost on process restart.
 
 The data models live here (rather than `api.py`) so the orchestration logic is
 testable without standing up FastAPI, mirroring how `simulation.py` and
