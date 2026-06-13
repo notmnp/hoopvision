@@ -7,7 +7,6 @@ import { Analytics } from "@vercel/analytics/react"
 import 'katex/dist/katex.min.css'
 import './index.css'
 import Navbar from './pages/Navbar.tsx'
-import AppFooter from './components/AppFooter.tsx'
 import Home from './pages/Home.tsx'
 import Scoreboard from './pages/Scoreboard.tsx'
 import Simulator from './pages/Simulator.tsx'
@@ -30,7 +29,6 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/draft" element={<DraftWorkspace />} />
             <Route path="/how-it-works" element={<HowItWorksView />} />
           </Routes>
-          <AppFooter />
           <Analytics />
         </TooltipProvider>
       </ThemeProvider>

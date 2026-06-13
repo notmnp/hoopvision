@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom"
 import { ArrowRight, ArrowUpRight, Swords, Trophy, Users } from "lucide-react"
 
+import AppFooter from "@/components/AppFooter"
 import { Button } from "@/components/ui/button"
 import { Kicker, Rule, StatFigure, HalftoneAvatar } from "@/components/editorial"
 import { useTheme } from "@/components/ui/theme-provider"
@@ -281,8 +282,8 @@ const Home = () => {
         </div>
       </section>
 
-      {/* Colophon now lives in the app-wide <AppFooter /> outside the route
-          outlet, so it appears on every page (How It Works blueprint). */}
+      {/* ── COLOPHON ───────────────────────────────────────────── */}
+      <AppFooter />
     </div>
   )
 }

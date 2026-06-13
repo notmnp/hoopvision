@@ -5,3 +5,6 @@ __pycache__/
 
 # Local environment files (committed example: frontend/.env.example)
 frontend/.env
+
+# Claude Code local session state
+.claude/scheduled_tasks.lock
