@@ -14,7 +14,11 @@ SEASON_B = "2010-11"
 
 
 def make_profile(
-    player_id, three_frequency=0.2, confidence_tier="MEDIUM", foul_drawing_rate=0.10
+    player_id,
+    three_frequency=0.2,
+    confidence_tier="MEDIUM",
+    foul_drawing_rate=0.10,
+    shot_zone_weights=None,
 ):
     return TendencyProfile(
         player_id=player_id,
@@ -34,7 +38,29 @@ def make_profile(
         era_adjustment={"era_key": "modern_spacing"},
         data_warnings=[],
         confidence_tier=confidence_tier,
+        shot_zone_weights=shot_zone_weights or {},
     )
+
+
+# One concrete court zone per band, so a simulated shot's recorded location is
+# fully determined by its band — lets the test assert exact placements.
+SINGLE_ZONE_WEIGHTS = {
+    "rim": [{"basic": "Restricted Area", "area": "Center(C)", "weight": 1.0}],
+    "mid_range": [{"basic": "Mid-Range", "area": "Left Side(L)", "weight": 1.0}],
+    "three": [{"basic": "Above the Break 3", "area": "Center(C)", "weight": 1.0}],
+}
+
+
+class ZonedStubProfileBuilder:
+    """Profile builder whose profiles carry shot_zone_weights, for location tests."""
+
+    def __init__(self, zones):
+        self.zones = zones
+
+    def build_profile(self, player_id, height_bucket="wing", season_id=None):
+        return make_profile(
+            player_id, foul_drawing_rate=0.05, shot_zone_weights=self.zones
+        )
 
 
 class StubProfileBuilder:
@@ -273,6 +299,84 @@ class SimulationEngineTest(unittest.TestCase):
         self.assertEqual(self.profile_builder.calls[1]["height_bucket"], "guard")
         self.assertEqual(self.profile_builder.calls[0]["season_id"], SEASON_A)
         self.assertEqual(self.profile_builder.calls[1]["season_id"], SEASON_B)
+
+    def test_field_goals_record_sampled_court_zone(self):
+        # Each band maps to exactly one zone, so a shot's recorded location is
+        # determined by its band; turnovers and drawn fouls carry no location.
+        engine = SimulationEngine(
+            self.players.get, ZonedStubProfileBuilder(SINGLE_ZONE_WEIGHTS)
+        )
+        expected = {
+            "rim": ("Restricted Area", "Center(C)"),
+            "mid_range": ("Mid-Range", "Left Side(L)"),
+            "three": ("Above the Break 3", "Center(C)"),
+        }
+
+        result = engine.simulate(1, 2, SEASON_A, SEASON_B, seed=11)
+
+        saw_field_goal = False
+        for play in result["play_by_play"]:
+            if play["result"] in ("made", "missed"):
+                saw_field_goal = True
+                self.assertEqual(
+                    (play["shot_zone_basic"], play["shot_zone_area"]),
+                    expected[play["shot_type"]],
+                )
+            else:  # turnover or foul_drawn
+                self.assertIsNone(play["shot_zone_basic"])
+                self.assertIsNone(play["shot_zone_area"])
+        self.assertTrue(saw_field_goal)
+
+    def test_shots_have_no_location_without_zone_weights(self):
+        # The stub builder supplies no shot_zone_weights, so no location is set
+        # and (critically) no RNG is consumed for it.
+        result = self.engine.simulate(1, 2, SEASON_A, SEASON_B, seed=11)
+
+        for play in result["play_by_play"]:
+            self.assertIsNone(play["shot_zone_basic"])
+            self.assertIsNone(play["shot_zone_area"])
+
+    def test_win_probability_curve_is_model_bounded(self):
+        result = self.engine.simulate(1, 2, SEASON_A, SEASON_B, seed=11)
+        wp = result["win_probability"]
+        pbp = result["play_by_play"]
+
+        self.assertEqual(len(wp), len(pbp))
+        for prob, play in zip(wp, pbp):
+            self.assertGreaterEqual(prob, 0.0)
+            self.assertLessEqual(prob, 1.0)
+            # No premature certainty: 1.0 / 0.0 only once a player has reached 21.
+            if play["score_a"] >= 21:
+                self.assertEqual(prob, 1.0)
+            elif play["score_b"] >= 21:
+                self.assertEqual(prob, 0.0)
+            else:
+                self.assertGreater(prob, 0.0)
+                self.assertLess(prob, 1.0)
+
+    def test_choose_shot_zone_consumes_no_rng_when_no_zones(self):
+        rng = random.Random(99)
+        twin = random.Random(99)
+
+        self.assertEqual(self.engine._choose_shot_zone(rng, []), (None, None))
+        # An empty zone list must not advance the RNG stream, so seeded games
+        # without location data stay byte-identical.
+        self.assertEqual(rng.random(), twin.random())
+
+    def test_choose_shot_zone_honors_weights(self):
+        zones = [
+            {"basic": "A", "area": "Left Side(L)", "weight": 1.0},
+            {"basic": "B", "area": "Center(C)", "weight": 9.0},
+        ]
+        rng = random.Random(3)
+        counts = {"A": 0, "B": 0}
+
+        for _ in range(2000):
+            basic, _area = self.engine._choose_shot_zone(rng, zones)
+            counts[basic] += 1
+
+        # The 9x-heavier zone should dominate by a wide margin.
+        self.assertGreater(counts["B"], counts["A"] * 3)
 
 
 class SimulateEndpointTest(unittest.TestCase):

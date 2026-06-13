@@ -196,6 +196,333 @@
   }
 }
 
+/* ---- Live broadcast shot FX ----
+   Scale animations on SVG elements need a fill-box origin so they grow about
+   their own center rather than the SVG (0,0). HTML overlays (ripple/score/
+   banner) keep their translate(-50%,…) centering inside the keyframes. The
+   global reduced-motion block below neutralizes all of these automatically. */
+.live-fx-origin {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+@keyframes live-shot-pop {
+  0% {
+    transform: scale(0.2);
+    opacity: 0;
+  }
+  55% {
+    transform: scale(1.35);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.animate-live-pop {
+  animation: live-shot-pop 0.42s ease-out both;
+}
+
+@keyframes live-net-ripple {
+  from {
+    transform: translate(-50%, -50%) scale(0.35);
+    opacity: 0.85;
+  }
+  to {
+    transform: translate(-50%, -50%) scale(2.6);
+    opacity: 0;
+  }
+}
+.animate-live-ripple {
+  animation: live-net-ripple 0.62s ease-out forwards;
+}
+
+@keyframes live-score-float {
+  0% {
+    transform: translate(-50%, 0) scale(0.85);
+    opacity: 0;
+  }
+  28% {
+    transform: translate(-50%, -9px) scale(1.08);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -36px) scale(1);
+    opacity: 0;
+  }
+}
+.animate-live-score {
+  animation: live-score-float 1.15s ease-out forwards;
+}
+
+@keyframes live-banner-flash {
+  0% {
+    transform: translate(-50%, -50%) scale(0.9);
+    opacity: 0;
+  }
+  18% {
+    transform: translate(-50%, -50%) scale(1.02);
+    opacity: 1;
+  }
+  78% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0;
+  }
+}
+.animate-live-banner {
+  animation: live-banner-flash 1.05s ease-out forwards;
+}
+
+/* A made three out-celebrates a two: an ink splash burst behind the rim. */
+@keyframes live-burst {
+  0% {
+    transform: translate(-50%, -50%) scale(0.4);
+    opacity: 0;
+  }
+  35% {
+    opacity: 0.55;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(2.3);
+    opacity: 0;
+  }
+}
+.animate-live-burst {
+  animation: live-burst 0.5s ease-out forwards;
+}
+
+/* +3 punches in harder than +2, then settles and floats off. */
+@keyframes live-score-pop3 {
+  0% {
+    transform: translate(-50%, 0) scale(0.6);
+    opacity: 0;
+  }
+  22% {
+    transform: translate(-50%, -16px) scale(1.4);
+    opacity: 1;
+  }
+  46% {
+    transform: translate(-50%, -20px) scale(1);
+  }
+  100% {
+    transform: translate(-50%, -46px) scale(1);
+    opacity: 0;
+  }
+}
+.animate-live-score3 {
+  animation: live-score-pop3 1.25s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* Miss "in-and-out": the kicked ball dips into the rim, rattles, rolls off. */
+@keyframes live-rimout {
+  0% {
+    transform: translate(-50%, -50%) translate(0, 0) scale(1);
+    opacity: 1;
+  }
+  22% {
+    transform: translate(-50%, -50%) translate(1px, 5px) scale(0.95);
+  }
+  46% {
+    transform: translate(-50%, -50%) translate(6px, 1px) scale(1);
+  }
+  68% {
+    transform: translate(-50%, -50%) translate(-3px, 4px) scale(1);
+  }
+  100% {
+    transform: translate(-50%, -50%) translate(-11px, 16px) scale(0.9);
+    opacity: 0;
+  }
+}
+.animate-live-rimout {
+  animation: live-rimout 0.55s cubic-bezier(0.5, 0, 0.3, 1) forwards;
+}
+
+/* Steal: a defender's poke streaks across the ball's path. */
+@keyframes live-swipe {
+  0% {
+    stroke-dashoffset: var(--swipe-len, 60);
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0.9;
+  }
+}
+.animate-live-swipe {
+  animation: live-swipe 0.32s ease-in forwards;
+}
+
+/* A made shot's marker drops onto the floor and settles with a small squash. */
+@keyframes live-dot-drop {
+  0% {
+    transform: translateY(-14px) scale(0);
+    opacity: 0;
+  }
+  60% {
+    transform: translateY(0) scale(1.2);
+    opacity: 1;
+  }
+  80% {
+    transform: translateY(0) scale(0.92);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+.animate-dot-drop {
+  animation: live-dot-drop 0.4s cubic-bezier(0.2, 0.9, 0.25, 1.2) both;
+}
+
+/* A fresh wire row slides up into the live feed. */
+@keyframes live-wire-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-wire-in {
+  animation: live-wire-in 0.26s ease-out both;
+}
+
+/* ---- Live broadcast: angled "camera" tilt of the court ----
+   The court SVG is tilted as one flat plane (a broadcast-cam look) while the
+   game plays. The wrapper provides perspective; the inner plane hinges at the
+   baseline (the rim end) so the far 3-point line falls away and the rim comes
+   toward the viewer. Only the SVG plane tilts — the HTML shot-reaction/tooltip
+   overlays stay flat so type never skews. */
+.court-cam {
+  perspective: 1300px;
+  perspective-origin: 18% 50%;
+}
+.court-floor {
+  /* A gentle broadcast-cam tilt held for the whole game (never flips flat, so the
+     shot arc always reads). Kept shallow (−6°, not −14°) so the 3-point corner
+     lines — which run along the foreshortened axis — read as essentially straight
+     rather than visibly slanting toward center, while still hinting at depth.
+     It's a static transform — no transition animates it, which avoids the janky
+     "rebuild" morph and keeps the SVG lines crisp. preserve-3d + a backface/own
+     compositing layer hint give clean GPU rasterization of the tilted plane and
+     tame sub-pixel line shimmer from the scale + rotateY. */
+  transform: rotateY(-6deg) scale(1.03);
+  transform-origin: 0% 50%;
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+}
+
+/* ---- Scoreboard rolling counter ----
+   A vertical digit strip translated by whole steps. The window is taller and
+   wider than the Fraunces ink box (--digit-h ≈ 1.32em vs ink ~0.9em; --digit-w
+   = 1ch tabular advance), so ascenders/descenders/foot-serifs sit in slack and
+   the Y-only overflow:hidden never reaches the glyph. Step height === window
+   height, so every landing is pixel-aligned. */
+.roll-window {
+  --digit-h: 1.32em;
+  --digit-w: 1ch;
+  --roll-dur: 440ms;
+  --roll-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  display: inline-flex;
+  align-items: flex-start;
+  justify-content: center;
+  height: var(--digit-h);
+  width: var(--digit-w);
+  overflow: hidden;
+  vertical-align: baseline;
+}
+.roll-strip {
+  display: flex;
+  flex-direction: column;
+  will-change: transform;
+  transition: transform var(--roll-dur) var(--roll-ease);
+}
+.roll-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--digit-h);
+  line-height: 1;
+}
+
+/* "+2 / +3" drifts quietly up off the number and fades — a subtle accent. */
+@keyframes score-pop-rise {
+  0% {
+    transform: translate(-50%, 0.1em);
+    opacity: 0;
+  }
+  35% {
+    transform: translate(-50%, -0.45em);
+    opacity: 0.65;
+  }
+  100% {
+    transform: translate(-50%, -1em);
+    opacity: 0;
+  }
+}
+.score-pop {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  pointer-events: none;
+  white-space: nowrap;
+  font-weight: 600;
+  font-size: 0.34em;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  animation: score-pop-rise 0.8s ease-out forwards;
+}
+.score-pop--3 {
+  animation-duration: 0.9s;
+}
+
+/* Each pre-tip countdown digit punches in and settles, re-fired per tick via a
+   changing React key so 3 → 2 → 1 each get their own beat. */
+@keyframes countdown-pop {
+  0% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+  30% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.92);
+    opacity: 0.85;
+  }
+}
+.countdown-pop {
+  animation: countdown-pop 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* The net snaps down and recoils when a shot drops through. */
+@keyframes live-net-swish {
+  0% {
+    transform: scaleY(1);
+  }
+  40% {
+    transform: scaleY(1.5);
+  }
+  100% {
+    transform: scaleY(1);
+  }
+}
+.animate-net-swish {
+  transform-box: fill-box;
+  transform-origin: top center;
+  animation: live-net-swish 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -18,7 +18,6 @@ import {
   ChevronDown,
   Dices,
   Info,
-  ListOrdered,
   Loader2,
   MoveHorizontal,
   Pencil,
@@ -71,8 +70,15 @@ import {
   PlayerSimStats,
   SimulationResult,
 } from "@/lib/simulation"
+import {
+  EnrichedPlay,
+  enrichPlays,
+  formatShotType,
+  resolveSides,
+} from "@/lib/liveGame"
 import TendencyComparisonPanel from "@/pages/TendencyComparisonPanel"
 import ShotChartSheet, { ShotChartTarget } from "@/pages/ShotChartSheet"
+import BroadcastStrip from "@/pages/BroadcastStrip"
 
 type SlotLabel = "Player A" | "Player B"
 
@@ -221,26 +227,14 @@ function PlayerSelectionController() {
   // Editorial billing for the active sample/shuffled bout, shown until the user
   // edits a corner. Cleared on any manual change so it never lies.
   const [billing, setBilling] = useState<string | null>(null)
-  // Tip-off reveal beat: a brief overlay flashed before results land. It plays
-  // only on the FIRST single-game run for a given matchup — `hasTippedOff`
-  // tracks that and resets whenever the matchup (either player) changes or a
-  // fresh bout is loaded, so a brand-new pairing earns the dramatic intro again.
-  // The tip-off content (the two names + optional editorial billing) and a
-  // separate visibility flag so the overlay can fade out while the content
-  // stays mounted through the transition.
-  const [tipOffData, setTipOffData] = useState<{
-    a: string
-    b: string
-    tag?: string
-  } | null>(null)
-  const [tipOffShow, setTipOffShow] = useState(false)
-  const hasTippedOff = useRef(false)
-  const tipOffTimer = useRef<number | null>(null)
   // Progressive disclosure: once a result exists, the setup detail (per-game
   // stat bars + the By-the-Numbers comparison) and the full play-by-play start
   // collapsed so the verdict + box score are the calm hero. Both re-expand on tap.
   const [setupExpanded, setSetupExpanded] = useState(false)
-  const [playByPlayOpen, setPlayByPlayOpen] = useState(false)
+  // The inline broadcast remounts (and re-scrolls) on each run; runId keys it
+  // and drives the scroll-to-court effect. broadcastRef is the scroll target.
+  const [runId, setRunId] = useState(0)
+  const broadcastRef = useRef<HTMLDivElement>(null)
   const [searchParams] = useSearchParams()
   // A matchup is only runnable once both players are confirmed AND each has a
   // season selected (AC-ISO-001.6 / AC-ISO-006.1).
@@ -272,32 +266,11 @@ function PlayerSelectionController() {
       token: nextToken(),
     })
     setBilling(rivalry.tag)
-    // Fresh bout (deep-link / Surprise me / sample) is a new matchup — re-arm
-    // the dramatic tip-off intro.
-    hasTippedOff.current = false
-  }, [])
-
-  // Play the dramatic "tip-off" beat: a blurred full-bleed flash framing the
-  // two names, with the editorial billing fading in above them a touch later.
-  // Skipped entirely for reduced-motion users.
-  const playTipOff = useCallback((a: string, b: string, tag?: string) => {
-    if (prefersReducedMotion()) return
-    setTipOffData({ a, b, tag })
-    setTipOffShow(true)
-    if (tipOffTimer.current !== null) {
-      window.clearTimeout(tipOffTimer.current)
-    }
-    tipOffTimer.current = window.setTimeout(() => {
-      setTipOffShow(false)
-      tipOffTimer.current = null
-    }, 2000)
   }, [])
 
   function surpriseMe() {
     const pick = RIVALRIES[Math.floor(Math.random() * RIVALRIES.length)]
     loadBout(pick)
-    // Same tip-off reveal as a first run, billed with the rivalry's nickname.
-    playTipOff(pick.a, pick.b, pick.tag)
   }
 
   // Deep-link / cold-start preload, run exactly once on mount. With ?a=&b= we
@@ -331,8 +304,6 @@ function PlayerSelectionController() {
     setBulkResult(null)
     setSimulationResult(null)
     setBilling(null)
-    // New matchup — re-arm the dramatic tip-off intro.
-    hasTippedOff.current = false
   }
 
   function selectPlayerB(player: PlayerProfile | null) {
@@ -341,8 +312,6 @@ function PlayerSelectionController() {
     setBulkResult(null)
     setSimulationResult(null)
     setBilling(null)
-    // New matchup — re-arm the dramatic tip-off intro.
-    hasTippedOff.current = false
   }
 
   function selectSeasonA(seasonId: string | null) {
@@ -364,14 +333,6 @@ function PlayerSelectionController() {
 
     setSimulationLoading(true)
     setSimulationError(null)
-    // Dramatic name-vs-name "tip-off" beat — shown only the FIRST time this
-    // matchup is run (Surprise me triggers its own). Every re-run ("Run it
-    // back") and the bulk 1,000-sim fall back to the simpler button/action-bar
-    // spinner instead. Non-blocking (the sim is already in flight above).
-    if (!hasTippedOff.current) {
-      hasTippedOff.current = true
-      playTipOff(playerA.name, playerB.name, billing ?? undefined)
-    }
 
     try {
       const response = await axios.post<SimulationResult>(
@@ -385,9 +346,10 @@ function PlayerSelectionController() {
         }
       )
       setSimulationResult(response.data)
-      // Land in the calm results view: setup detail + diary start collapsed.
+      // Collapse the setup detail so the broadcast is the hero, and bump runId
+      // to remount the inline broadcast from the tip + trigger the scroll-to.
       setSetupExpanded(false)
-      setPlayByPlayOpen(false)
+      setRunId((id) => id + 1)
     } catch (error) {
       setSimulationError(getSimulationError(error))
     } finally {
@@ -424,14 +386,19 @@ function PlayerSelectionController() {
     }
   }
 
-  // Clear any pending tip-off fade-out timer on unmount.
+  // Glide down to the inline broadcast each time a game is run.
   useEffect(() => {
-    return () => {
-      if (tipOffTimer.current !== null) {
-        window.clearTimeout(tipOffTimer.current)
-      }
-    }
-  }, [])
+    if (runId === 0) return
+    const target = broadcastRef.current
+    if (!target) return
+    const frame = window.requestAnimationFrame(() => {
+      target.scrollIntoView({
+        behavior: prefersReducedMotion() ? "auto" : "smooth",
+        block: "start",
+      })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [runId])
 
   return (
     <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-screen-xl flex-col px-4 py-8 md:px-6">
@@ -545,36 +512,6 @@ function PlayerSelectionController() {
         </div>
       )}
 
-      {/* Tendency Explorer comparison panel: appears automatically once both
-          players and seasons are confirmed and their season stats have loaded,
-          below the player cards and ahead of the simulation results. The
-          season_id guard avoids rendering against a previous season's stats
-          while a newly selected season is still loading. In results mode it's
-          collapsed behind the "Edit matchup" toggle above. */}
-      {(!hasResults || setupExpanded) &&
-        playerA &&
-        playerB &&
-        seasonA &&
-        seasonB &&
-        seasonStatsA?.season_id === seasonA &&
-        seasonStatsB?.season_id === seasonB && (
-          <TendencyComparisonPanel
-            playerA={playerA}
-            playerB={playerB}
-            seasonA={seasonA}
-            seasonB={seasonB}
-            statsA={seasonStatsA}
-            statsB={seasonStatsB}
-            onViewShotChart={(player, seasonId) =>
-              setShotChartTarget({
-                playerId: player.player_id,
-                playerName: player.name,
-                seasonId,
-              })
-            }
-          />
-        )}
-
       <ShotChartSheet
         target={shotChartTarget}
         onOpenChange={(open) => {
@@ -598,9 +535,28 @@ function PlayerSelectionController() {
         />
       )}
 
+      {/* The live broadcast plays inline, right here on the page — clicking
+          "Run game" reveals it and scrolls down to the court. It carries the
+          full game: live floor → final shot-chart comparison → play-by-play. */}
       {simulationResult && playerA && playerB && (
-        <div className="mt-6 space-y-4">
-          {/* The single-game box score (secondary to the 1,000-sim verdict). */}
+        <div ref={broadcastRef} className="scroll-mt-20">
+          <BroadcastStrip
+            key={runId}
+            result={simulationResult}
+            playerA={{ player_id: playerA.player_id, name: playerA.name }}
+            playerB={{ player_id: playerB.player_id, name: playerB.name }}
+            accentA={getTeamColor(seasonStatsA?.team_abbreviation)}
+            accentB={getTeamColor(seasonStatsB?.team_abbreviation)}
+            billing={billing}
+          />
+        </div>
+      )}
+
+      {/* The Game Story: the final scoreline + per-player box and the
+          zone-percentage shot map. Sits below the replayable broadcast as the
+          settled verdict for the single game. */}
+      {simulationResult && playerA && playerB && (
+        <div className="mt-6">
           <MatchSummaryView
             summary={simulationResult.summary}
             playerAName={playerA.name}
@@ -608,36 +564,39 @@ function PlayerSelectionController() {
             onRerun={runSimulation}
             rerunDisabled={busy}
           />
-
-          {/* The Running Diary is the heaviest region — collapsed by default
-              behind a toggle, with the lead-margin summary still in reach via
-              the button copy. The exported PlayByPlayView is unchanged. */}
-          <div>
-            <Button
-              variant="outline"
-              onClick={() => setPlayByPlayOpen((open) => !open)}
-              aria-expanded={playByPlayOpen}
-              className="w-full justify-center font-condensed text-sm font-bold uppercase tracking-[0.14em] tabular-nums"
-            >
-              <ListOrdered className="h-4 w-4" />
-              {playByPlayOpen
-                ? "Hide play-by-play"
-                : `Show play-by-play (${simulationResult.play_by_play.length} possessions)`}
-              <ChevronDown
-                className={cn(
-                  "h-4 w-4 transition-transform",
-                  playByPlayOpen && "rotate-180"
-                )}
-              />
-            </Button>
-            {playByPlayOpen && (
-              <div className="mt-4">
-                <PlayByPlayView playByPlay={simulationResult.play_by_play} />
-              </div>
-            )}
-          </div>
         </div>
       )}
+
+      {/* Head-to-head comparison: appears once both players and seasons are
+          confirmed and their season stats have loaded, and STAYS pinned at the
+          bottom of the page even after a simulation runs (pre-game it sits
+          directly under the player cards). The season_id guard avoids rendering
+          against a previous season's stats while a newly selected season is
+          still loading. */}
+      {playerA &&
+        playerB &&
+        seasonA &&
+        seasonB &&
+        seasonStatsA?.season_id === seasonA &&
+        seasonStatsB?.season_id === seasonB && (
+          <div className={cn(hasResults && "mt-6")}>
+            <TendencyComparisonPanel
+              playerA={playerA}
+              playerB={playerB}
+              seasonA={seasonA}
+              seasonB={seasonB}
+              statsA={seasonStatsA}
+              statsB={seasonStatsB}
+              onViewShotChart={(player, seasonId) =>
+                setShotChartTarget({
+                  playerId: player.player_id,
+                  playerName: player.name,
+                  seasonId,
+                })
+              }
+            />
+          </div>
+        )}
 
       <RunActionBar
         canRun={canRunSimulation}
@@ -649,8 +608,6 @@ function PlayerSelectionController() {
         onRun={runSimulation}
         onRunBulk={runBulkSimulation}
       />
-
-      <TipOffOverlay show={tipOffShow} data={tipOffData} />
     </div>
   )
 }
@@ -738,62 +695,8 @@ function RunActionBar({
   )
 }
 
-// The "tip-off" beat: a dramatic full-bleed flash framing the two names as a
-// verdict is computed. It lingers ~1s (the controller toggles `show` off after
-// that) and fades smoothly in and out via an opacity transition, so it stays
-// readable. Always non-blocking (pointer-events-none) so the sim runs beneath.
-// Only ever rendered with `show` toggling for the first run of a matchup;
-// reduced-motion users never see it (the controller skips the beat entirely).
-function TipOffOverlay({
-  show,
-  data,
-}: {
-  show: boolean
-  data: { a: string; b: string; tag?: string } | null
-}) {
-  return (
-    <div
-      className={cn(
-        "pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm transition-opacity duration-500 ease-in-out",
-        show ? "opacity-100" : "opacity-0"
-      )}
-      aria-hidden
-    >
-      <div
-        className={cn(
-          "flex flex-col items-center gap-3 transition-all duration-500 ease-out",
-          show ? "scale-100 opacity-100" : "scale-95 opacity-0"
-        )}
-      >
-        {/* Editorial billing (the rivalry nickname) — fades in a beat after the
-            names land, in vermillion, like a fight-card subtitle. */}
-        {data?.tag && (
-          <span
-            className={cn(
-              "font-display text-base font-bold italic tracking-tight text-primary transition-all duration-700 ease-out [transition-delay:400ms] sm:text-xl",
-              show ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0"
-            )}
-          >
-            {data.tag}
-          </span>
-        )}
-        <div className="flex items-center gap-4">
-          <span className="display text-3xl sm:text-5xl">
-            {lastNameOf(data?.a ?? "")}
-          </span>
-          <span className="font-display text-2xl font-black italic text-primary sm:text-3xl">
-            vs.
-          </span>
-          <span className="display text-3xl sm:text-5xl">
-            {lastNameOf(data?.b ?? "")}
-          </span>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// Respect the user's reduced-motion preference for the tip-off beat.
+// Respect the user's reduced-motion preference (drives the scroll-to-broadcast
+// behavior; the in-court countdown reads it separately).
 function prefersReducedMotion(): boolean {
   return (
     typeof window !== "undefined" &&
@@ -1967,77 +1870,6 @@ function ZoneChip({
   )
 }
 
-// A possession enriched with the duel context we visualize: which side shot,
-// the running lead, whether the lead just flipped, and any scoring-run milestone.
-interface EnrichedPlay {
-  play: PlayByPlay
-  side: "a" | "b"
-  margin: number
-  leadChange: boolean
-  runSide: "a" | "b" | null
-  runCallout: number | null
-}
-
-// Figure out which player name is "A" vs "B" purely from score deltas:
-// score_a only grows on A's makes. Explicit name hints win; the complement
-// covers a player who never scored. Keeps the bracket caller prop-free.
-function resolveSides(plays: PlayByPlay[], hintA?: string, hintB?: string) {
-  const map = new Map<string, "a" | "b">()
-  let pa = 0
-  let pb = 0
-  for (const p of plays) {
-    if (p.score_a > pa) map.set(p.offensive_player, "a")
-    if (p.score_b > pb) map.set(p.offensive_player, "b")
-    pa = p.score_a
-    pb = p.score_b
-  }
-  const names = Array.from(new Set(plays.map((p) => p.offensive_player)))
-  let nameA = hintA ?? [...map].find(([, s]) => s === "a")?.[0]
-  let nameB = hintB ?? [...map].find(([, s]) => s === "b")?.[0]
-  if (!nameA) nameA = names.find((n) => n !== nameB)
-  if (!nameB) nameB = names.find((n) => n !== nameA)
-  return { nameA: nameA ?? "Player A", nameB: nameB ?? "Player B" }
-}
-
-function enrichPlays(plays: PlayByPlay[], nameA: string): EnrichedPlay[] {
-  let prevMargin = 0
-  let runSide: "a" | "b" | null = null
-  let runPts = 0
-  let lastEmitted = 0
-  return plays.map((play, i) => {
-    const prev = plays[i - 1]
-    const pts =
-      play.score_a -
-      (prev?.score_a ?? 0) +
-      (play.score_b - (prev?.score_b ?? 0))
-    const side: "a" | "b" = play.offensive_player === nameA ? "a" : "b"
-    const margin = play.score_a - play.score_b
-    const leadChange =
-      i > 0 &&
-      margin !== 0 &&
-      prevMargin !== 0 &&
-      Math.sign(margin) !== Math.sign(prevMargin)
-
-    let runCallout: number | null = null
-    if (pts > 0) {
-      if (runSide === side) {
-        runPts += pts
-      } else {
-        runSide = side
-        runPts = pts
-        lastEmitted = 0
-      }
-      // Announce a run once it reaches 6, then again every +4 so it doesn't spam.
-      if (runPts >= 6 && runPts - lastEmitted >= 4) {
-        runCallout = runPts
-        lastEmitted = runPts
-      }
-    }
-    prevMargin = margin
-    return { play, side, margin, leadChange, runSide, runCallout }
-  })
-}
-
 // Exported for reuse by the GOAT Bracket series drill-down. playerA/playerB are
 // optional name hints; without them the sides are inferred from the score.
 export function PlayByPlayView({
@@ -2352,16 +2184,6 @@ function verdictHeadline(favoriteName: string, favoritePct: number): string {
   if (favoritePct >= 65) return `${last} Has the Edge.`
   if (favoritePct >= 55) return `${last}, Narrowly.`
   return "Too Close to Call."
-}
-
-function formatShotType(shotType: string) {
-  if (shotType === "mid_range") {
-    return "mid-range"
-  }
-  if (shotType === "three") {
-    return "three-point"
-  }
-  return shotType
 }
 
 const SimulatorView = PlayerSelectionController
