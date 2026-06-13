@@ -3,11 +3,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { PlayByPlay } from "@/lib/simulation"
 import { buildTimeline } from "@/lib/liveGame"
 
-export type PlaybackSpeed = 1 | 2 | 4 | 8
+export type PlaybackSpeed = 1 | 2 | 4
 
 // Game-seconds the count-up clock advances per real second at 1x. Tuned so an
 // average possession (~13 game-seconds) takes ~1.5s of real time at 1x — an
-// unhurried "watch the shot" pace; 2x/4x/8x speed it up from there.
+// unhurried "watch the shot" pace; 2x/4x speed it up from there.
 const BASE_RATE = 8.5
 
 // Drives a client-side, possession-by-possession replay of an already-computed

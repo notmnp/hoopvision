@@ -6,13 +6,23 @@ import {
   useRef,
   useState,
 } from "react"
-import { Gauge, Grab, Pause, Play, RotateCcw, SkipForward, Zap } from "lucide-react"
+import {
+  Dices,
+  Grab,
+  Loader2,
+  Pause,
+  Play,
+  RotateCcw,
+  SkipForward,
+} from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { HalftoneAvatar, Kicker } from "@/components/editorial"
 import { Button } from "@/components/ui/button"
 import {
+  COURT_H,
   COURT_VIEWBOX,
+  COURT_W,
   CourtLines,
   HOOP,
   RIM_R,
@@ -25,12 +35,15 @@ import {
 import {
   type ActiveShot,
   type LiveEventKind,
+  activeEventAt,
   activeShotAt,
   boxScoreThrough,
+  clamp01,
   emptyStatLine,
   enrichPlays,
   type EnrichedPlay,
   formatClock,
+  frac,
   type LiveStatLine,
   pointsForPlay,
   resolveSides,
@@ -39,22 +52,27 @@ import {
   zoneFgPct,
   zoneSplitsThrough,
 } from "@/lib/liveGame"
-import { formatPct, gradeZone, hexToRgb } from "@/lib/shotEfficiency"
+import { formatPct, gradeZone } from "@/lib/shotEfficiency"
 import { useLiveGame, type PlaybackSpeed } from "@/hooks/useLiveGame"
-import { PlayByPlay, SimulationResult } from "@/lib/simulation"
+import { MatchSummary, PlayByPlay, SimulationResult } from "@/lib/simulation"
 
-const SPEEDS: PlaybackSpeed[] = [1, 2, 4, 8]
-const AUTOSKIP_KEY = "hooper.autoSkip"
-const VERMILLION = "#d2401f"
-// The shot line is colored by its eventual outcome so the result reads from the
-// trajectory itself: orange when it's going in, red when it's going to miss.
-const SHOT_ORANGE = "#e0852f" // a make — also the net's brief orange flash
-const SHOT_RED = "#e23b2e" // a miss — the net does not change
-const SLATE = "#3f6fa3"
-// Non-shot possession chips: amber for a drawn foul (a caution, not a card),
-// vermillion-red for a turnover/steal (a strip).
-const FOUL_AMBER = "#d99a2b"
-const STEAL_RED = VERMILLION
+const SPEEDS: PlaybackSpeed[] = [1, 2, 4]
+
+// The single family of on-court mark sizes, so the shot dots and the foul/steal
+// glyphs read as one set rather than slightly different sizes.
+const DOT_R = 6 // a settled shot dot AND the event-glyph disc
+const HOVER_PAD = 5 // hover ring = mark radius + this
+const HIT_R = 14 // invisible hover/focus target (same for dots and glyphs)
+const BALL_R = 4.2 // the in-flight ball head / carom / drop-through
+
+// A foul/steal glyph's brief swell as it happens (a pure function of the
+// flourish progress `t`), shared by both EventFx branches.
+const eventSwell = (t: number) => 1 + 0.35 * Math.sin(clamp01(t * 1.2) * Math.PI)
+
+// SVG transform string that scales `scale` about the point (x, y) — scale() is
+// origin-relative, so the translate by x(1-scale) keeps that point fixed.
+const scaleAbout = (x: number, y: number, scale: number) =>
+  `translate(${x * (1 - scale)} ${y * (1 - scale)}) scale(${scale})`
 
 type Live = ReturnType<typeof useLiveGame>
 
@@ -63,128 +81,175 @@ interface LivePlayer {
   name: string
 }
 
-// An inline, single-screen broadcast of an already-computed 1v1 game: court +
-// scoreboard on the left, the play-by-play + a live win-probability ("Odds")
-// graph on the right, transport across the bottom — all bounded to roughly one
-// viewport so the growing play-by-play never scrolls the page. The court keeps
-// its angled broadcast-camera tilt throughout (so the shot arc reads); at the
-// final whistle it becomes a two-player shot-chart comparison with a
-// zone-efficiency heat map.
+// An inline broadcast of an already-computed 1v1 game, laid out like a printed
+// sports page: scoreboard plate up top, the court diagram (with the transport
+// directly beneath it) on the left, the play-by-play wire + win-probability
+// chart on the right. At the final whistle the court becomes a two-player
+// shot-chart comparison and the live box becomes the Game Story — the settled
+// box score with the winner called. Everything is flat ink-on-paper: hairline
+// borders, halftone texture, the two design data tones as the only hues.
 export default function BroadcastStrip({
   result,
   playerA,
   playerB,
-  accentA,
-  accentB,
   billing,
+  onRerun,
+  rerunDisabled,
+  warningsSlot,
 }: {
   result: SimulationResult
   playerA: LivePlayer
   playerB: LivePlayer
-  accentA?: string | null
-  accentB?: string | null
   billing?: string | null
+  onRerun?: () => void
+  rerunDisabled?: boolean
+  warningsSlot?: ReactNode
 }) {
   const plays = result.play_by_play
+  // The OS reduced-motion preference is the only thing that suppresses the
+  // per-shot animation (the old "Auto-skip" override was removed).
   const reduced = usePrefersReducedMotion()
-  const [autoSkip, setAutoSkip] = usePersistentToggle(AUTOSKIP_KEY)
-  const effectiveReduced = reduced || autoSkip
 
-  // Autoplay is held off until the on-court 3-2-1 countdown completes.
-  const live = useLiveGame(plays, false, 0)
+  // The replay engine, parked at the final whistle (Infinity clamps to the
+  // game's full length). The broadcast NEVER auto-plays: every run opens "on
+  // the shelf" — score, Game Story and shot chart settled up front — and the
+  // full animated replay (countdown, shot arcs, the lot) is opt-in via the
+  // "Watch how the game unfolded" button.
+  const live = useLiveGame(plays, false, Number.POSITIVE_INFINITY)
   const finished = live.finished
 
-  // A quick 3-2-1 countdown shown on the court before tip-off (this replaces the
-  // old full-screen name-vs-name overlay). The game stays paused until it hits
-  // zero, then playback begins. Skipped for reduced-motion / auto-skip viewers,
-  // who jump straight into the game.
-  const [countdown, setCountdown] = useState(() => {
-    if (typeof window === "undefined" || autoSkip) return 0
-    return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? 0 : 3
-  })
-  const countingDown = countdown > 0
+  // The intro phase machine: "shelf" (parked at the final, watch button armed),
+  // "countdown" (the on-court 3-2-1 before the tip), "rolling" (playback owns
+  // the clock). Reduced-motion viewers never see the countdown.
+  const [phase, setPhase] = useState<"shelf" | "countdown" | "rolling">("shelf")
+  const [countdown, setCountdown] = useState(3)
+  const countingDown = phase === "countdown"
+  const shelf = phase === "shelf"
+
   useEffect(() => {
+    if (phase !== "countdown") return
     if (countdown <= 0) {
-      live.play()
+      setPhase("rolling")
       return
     }
     const timer = window.setTimeout(() => setCountdown((c) => c - 1), 650)
     return () => window.clearTimeout(timer)
-    // live.play is stable for a given game; re-run only on each countdown tick.
+  }, [phase, countdown])
+
+  // Entering "rolling" starts playback; play() restarts from the tip when the
+  // clock is parked at the final whistle (the shelf → watch transition).
+  useEffect(() => {
+    if (phase === "rolling") live.play()
+    // live.play is stable for a given game.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [countdown])
+  }, [phase])
+
+  // The settled (post-game) presentation: at the final whistle AND not mid-intro.
+  // During the watch-button countdown the clock is still parked at the end, so
+  // `finished` alone would leak the result back onto the screen.
+  const settled = finished && !countingDown
+
+  // Nothing is "revealed" until tip-off — otherwise possession 0 (whose timeline
+  // slot starts at t=0) would leak its outcome onto the scoreboard, the live box
+  // and the wire while the countdown is still running.
+  const shown = countingDown ? 0 : live.revealedCount
 
   const { nameA, nameB } = useMemo(
     () => resolveSides(plays, playerA.name, playerB.name),
     [plays, playerA.name, playerB.name]
   )
-  const { colorA, colorB } = useMemo(
-    () => resolvePalette(accentA, accentB),
-    [accentA, accentB]
-  )
+  // The two players are always the design's data tones — vermillion (the house
+  // accent) for A, ink-blue (the established "secondary data tone") for B. Both
+  // are theme tokens, so they adapt to Paper/Ink, and being fixed they're always
+  // maximally distinct (team colours risked two reds or two blues reading the
+  // same). CSS vars, used directly as SVG/CSS colours throughout.
+  const colorA = "var(--primary)"
+  const colorB = "var(--ink-blue)"
   const enriched = useMemo(() => enrichPlays(plays, nameA), [plays, nameA])
 
-  const current = live.revealedCount > 0 ? plays[live.revealedCount - 1] : null
+  const current = shown > 0 ? plays[shown - 1] : null
   const scoreA = current ? current.score_a : 0
   const scoreB = current ? current.score_b : 0
-  const possessionSide: "a" | "b" | null = current
-    ? current.offensive_player === nameA
-      ? "a"
-      : "b"
-    : null
+  const possessionSide: "a" | "b" | null =
+    current && !settled
+      ? current.offensive_player === nameA
+        ? "a"
+        : "b"
+      : null
 
   const [filter, setFilter] = useState<"a" | "b" | null>(null)
+  // Any explicit jump into the timeline takes over from the shelf/intro.
   const jump = (seconds: number) => {
+    setPhase("rolling")
     live.seek(seconds)
     live.play()
   }
   const replay = () => {
     setFilter(null)
+    setPhase("rolling")
     live.seek(0)
     live.play()
   }
-
-  const footer = finished ? (
-    <ShootingSplits plays={plays} nameA={nameA} nameB={nameB} colorA={colorA} colorB={colorB} />
-  ) : (
-    <OddsGraph
-      enriched={enriched}
-      timings={live.timings}
-      revealedCount={live.revealedCount}
-      finished={finished}
-      nameA={nameA}
-      nameB={nameB}
-      colorA={colorA}
-      colorB={colorB}
-      reduced={reduced}
-      winProb={result.win_probability ?? []}
-      onJump={jump}
-    />
-  )
+  // The shelf's "Watch how the game unfolded": run the 3-2-1, then the rolling
+  // effect rewinds to the tip and plays. OS-level reduced-motion skips the
+  // countdown and the shot animation, as it must.
+  const watch = () => {
+    if (reduced) {
+      setPhase("rolling")
+      return
+    }
+    setCountdown(3)
+    setPhase("countdown")
+  }
 
   return (
-    <section
-      className={cn(
-        "mt-6 flex min-h-[calc(100svh-5rem)] flex-col gap-3",
-        "lg:grid lg:h-[calc(100svh-5rem)] lg:min-h-[600px] lg:max-h-[940px] lg:grid-rows-[auto_minmax(0,1fr)_auto] lg:gap-3"
-      )}
-    >
-      {/* Scoreboard */}
-      <div className="rounded-sm border border-border bg-card/70 px-3 py-2.5 backdrop-blur">
-        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-4">
-          <TeamPlate player={playerA} score={scoreA} color={colorA} leading={scoreA > scoreB} hasBall={possessionSide === "a"} align="right" reduced={effectiveReduced} />
-          <CenterColumn clockSeconds={live.clockSeconds} finished={finished} billing={billing} reduced={reduced} />
-          <TeamPlate player={playerB} score={scoreB} color={colorB} leading={scoreB > scoreA} hasBall={possessionSide === "b"} align="left" reduced={effectiveReduced} />
+    <section className="mt-6 space-y-3">
+      {/* Scoreboard plate — flat card, hairline border (no glassy blur). The
+          center clock/status column is framed with vertical rules so the whole
+          thing reads like a printed scorecard rather than an app status bar. */}
+      <div className="overflow-hidden rounded-sm border border-border bg-card">
+        <div className="grid grid-cols-[1fr_auto_1fr] items-stretch gap-2 py-2 pl-3 pr-3 sm:gap-4">
+          <TeamPlate
+            player={playerA}
+            score={scoreA}
+            color={colorA}
+            leading={scoreA > scoreB}
+            hasBall={possessionSide === "a"}
+            winner={settled && scoreA > scoreB}
+            align="right"
+            reduced={reduced}
+          />
+          <CenterColumn
+            clockSeconds={countingDown ? 0 : live.clockSeconds}
+            finished={settled}
+            billing={billing}
+            reduced={reduced}
+          />
+          <TeamPlate
+            player={playerB}
+            score={scoreB}
+            color={colorB}
+            leading={scoreB > scoreA}
+            hasBall={possessionSide === "b"}
+            winner={settled && scoreB > scoreA}
+            align="left"
+            reduced={reduced}
+          />
         </div>
       </div>
 
-      {/* Body: court (left) + play-by-play (right) */}
-      <div className="grid min-h-0 gap-3 lg:grid-cols-[minmax(0,1.5fr)_minmax(300px,1fr)]">
+      {/* Body: court + transport + box (left), play-by-play + odds (right).
+          The right column never drives the row height — it absolutely fills its
+          cell and scrolls internally, so the court can never slide behind it. */}
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.6fr)_minmax(320px,1fr)]">
         {/* Left column */}
-        <div className="flex min-h-0 flex-col gap-2">
-          <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-1">
-            <div className="flex items-center gap-3 font-condensed text-[0.7rem] font-bold uppercase tracking-[0.1em] text-muted-foreground">
-              <Kicker tone="muted">{finished ? "The Shot Chart" : "The Floor"}</Kicker>
+        <div className="flex min-w-0 flex-col gap-2">
+          {/* Fixed height so the row never grows when the shot-chart filter
+              toggle appears at the final whistle — the court below stays put
+              instead of jumping down. */}
+          <div className="flex min-h-8 shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-1">
+            <div className="flex items-center gap-3 kicker text-muted-foreground">
+              <Kicker tone="muted">{settled ? "The Shot Chart" : "The Floor"}</Kicker>
               <LegendDot color={colorA} label={lastName(nameA)} />
               <LegendDot color={colorB} label={lastName(nameB)} />
               <span className="hidden items-center gap-1 sm:flex">
@@ -192,21 +257,21 @@ export default function BroadcastStrip({
                 open = miss
               </span>
             </div>
-            {finished && <FilterToggle value={filter} onChange={setFilter} nameA={nameA} nameB={nameB} />}
+            {settled && !shelf && <FilterToggle value={filter} onChange={setFilter} nameA={nameA} nameB={nameB} />}
           </div>
 
-          <div className="relative flex min-h-0 flex-1 items-center justify-center">
+          <div className="relative">
             <FloorStage
               plays={plays}
-              revealedCount={live.revealedCount}
+              revealedCount={shown}
               currentPossession={current?.possession ?? null}
               nameA={nameA}
               colorA={colorA}
               colorB={colorB}
-              reduced={effectiveReduced}
-              showFx={!finished}
+              reduced={reduced}
+              showFx={!settled}
               started={!countingDown}
-              filterSide={finished ? filter : null}
+              filterSide={settled ? filter : null}
               clockSeconds={live.clockSeconds}
               timings={live.timings}
             />
@@ -219,42 +284,110 @@ export default function BroadcastStrip({
                 count={countdown}
               />
             )}
+            {/* The shelf: the settled chart sits softly blurred behind the one
+                action that matters — replaying the game you already have the
+                verdict for. Opt-in motion instead of forced motion. */}
+            {shelf && (
+              <div className="absolute inset-0 z-20 flex items-center justify-center rounded-sm bg-background/35 backdrop-blur-[2px]">
+                <Button
+                  variant="default"
+                  onClick={watch}
+                  className="font-condensed font-bold uppercase tracking-[0.14em]"
+                >
+                  <Play className="h-4 w-4" />
+                  Watch the game
+                </Button>
+              </div>
+            )}
           </div>
 
-          <LiveBox plays={plays} revealedCount={live.revealedCount} nameA={nameA} nameB={nameB} colorA={colorA} colorB={colorB} />
+          {/* The transport sits directly under the court, like a film scrubber
+              under its frame. At the final it swaps for the replay/re-run pair
+              (on the shelf the watch button already covers the replay). */}
+          {settled ? (
+            <div className="flex items-center justify-center gap-2 py-1">
+              {!shelf && (
+                <Button
+                  variant="outline"
+                  onClick={replay}
+                  className="font-condensed font-bold uppercase tracking-[0.14em]"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  Watch the game again
+                </Button>
+              )}
+              {onRerun && (
+                <Button
+                  variant={shelf ? "outline" : "default"}
+                  onClick={onRerun}
+                  disabled={rerunDisabled}
+                  className="font-condensed font-bold uppercase tracking-[0.14em]"
+                >
+                  {rerunDisabled ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Dices className="h-4 w-4" />
+                  )}
+                  Run it back
+                </Button>
+              )}
+            </div>
+          ) : (
+            <Transport live={live} />
+          )}
+
+          <GameBox
+            plays={plays}
+            revealedCount={shown}
+            nameA={nameA}
+            nameB={nameB}
+            colorA={colorA}
+            colorB={colorB}
+            finished={settled}
+            summary={summaryOrNull(result.summary, settled)}
+            warningsSlot={warningsSlot}
+          />
         </div>
 
-        {/* Right column: play-by-play + footer graph/splits */}
-        <WireFeed
-          enriched={enriched}
-          timings={live.timings}
-          revealedCount={live.revealedCount}
-          currentPossession={current?.possession ?? null}
-          nameA={nameA}
-          colorA={colorA}
-          colorB={colorB}
-          reduced={effectiveReduced}
-          finished={finished}
-          seek={jump}
-          footer={footer}
-        />
-      </div>
-
-      {/* Transport */}
-      <div className="shrink-0">
-        {finished ? (
-          <div className="flex items-center justify-center gap-2">
-            <Button variant="outline" onClick={replay} className="font-condensed font-bold uppercase tracking-[0.14em]">
-              <RotateCcw className="h-4 w-4" />
-              Replay from tip
-            </Button>
-          </div>
-        ) : (
-          <Transport live={live} autoSkip={autoSkip} onAutoSkip={setAutoSkip} />
-        )}
+        {/* Right column: play-by-play wire + win-probability footer */}
+        <div className="relative h-[30rem] min-w-0 lg:h-auto">
+          <WireFeed
+            enriched={enriched}
+            timings={live.timings}
+            revealedCount={shown}
+            currentPossession={current?.possession ?? null}
+            nameA={nameA}
+            colorA={colorA}
+            colorB={colorB}
+            reduced={reduced}
+            finished={settled}
+            seek={jump}
+            footer={
+              <OddsGraph
+                enriched={enriched}
+                timings={live.timings}
+                revealedCount={shown}
+                finished={settled}
+                nameA={nameA}
+                nameB={nameB}
+                colorA={colorA}
+                colorB={colorB}
+                reduced={reduced}
+                winProb={result.win_probability ?? []}
+                onJump={jump}
+              />
+            }
+          />
+        </div>
       </div>
     </section>
   )
+}
+
+// The Game Story header only makes sense once the game is settled; while live,
+// the box renders without the summary chrome.
+function summaryOrNull(summary: MatchSummary | undefined, finished: boolean) {
+  return finished ? summary ?? null : null
 }
 
 /* -------------------------------------------------------------------------- */
@@ -267,6 +400,7 @@ function TeamPlate({
   color,
   leading,
   hasBall,
+  winner,
   align,
   reduced,
 }: {
@@ -275,6 +409,7 @@ function TeamPlate({
   color: string
   leading: boolean
   hasBall: boolean
+  winner: boolean
   align: "left" | "right"
   reduced: boolean
 }) {
@@ -292,14 +427,19 @@ function TeamPlate({
   const nameBlock = (
     <div className={cn("min-w-0", align === "right" ? "text-right" : "text-left")}>
       <div className="truncate display text-sm leading-none sm:text-xl">{player.name}</div>
-      <div
-        className={cn(
-          "mt-1 h-0.5 w-8 rounded-full transition-opacity",
-          align === "right" ? "ml-auto" : "mr-auto",
-          leading ? "opacity-100" : "opacity-30"
+      {/* Fixed-height slot holding either the leading underline or the "Winner"
+          tag, so swapping between them (live → final) never changes the plate's
+          height and shifts the scoreboard. */}
+      <div className={cn("mt-1 flex h-3.5 items-center", align === "right" ? "justify-end" : "justify-start")}>
+        {winner ? (
+          <span className="kicker leading-none text-primary">Winner</span>
+        ) : (
+          <span
+            className={cn("h-0.5 w-8 rounded-full transition-opacity", leading ? "opacity-100" : "opacity-30")}
+            style={{ backgroundColor: color }}
+          />
         )}
-        style={{ backgroundColor: color }}
-      />
+      </div>
     </div>
   )
   const avatar = (
@@ -427,15 +567,20 @@ function CenterColumn({
   reduced: boolean
 }) {
   return (
-    <div className="flex flex-col items-center gap-0.5 px-1">
-      {finished ? (
-        <Kicker tone="muted">Final</Kicker>
-      ) : (
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-court/40 bg-court/10 px-2.5 py-0.5 font-condensed text-[0.7rem] font-bold uppercase tracking-[0.14em] text-court">
-          <span className={cn("size-1.5 rounded-full bg-court", !reduced && "animate-pulse")} />
-          Live
-        </span>
-      )}
+    <div className="flex flex-col items-center justify-center gap-1 self-stretch border-x border-border/60 bg-muted/15 px-3 sm:px-6">
+      {/* Fixed-height status slot so the LIVE pill (taller than the "Final"
+          kicker) doesn't change the scoreboard's height when the game ends or
+          the replay starts. */}
+      <div className="flex h-5 items-center justify-center">
+        {finished ? (
+          <Kicker tone="muted">Final</Kicker>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 rounded-sm border border-court/40 bg-court/10 px-2 py-0.5 font-condensed text-[0.7rem] font-bold uppercase tracking-[0.14em] text-court">
+            <span className={cn("size-1.5 rounded-full bg-court", !reduced && "animate-pulse")} />
+            Live
+          </span>
+        )}
+      </div>
       <div className="stat-figure text-2xl leading-none tabular-nums sm:text-3xl">{formatClock(clockSeconds)}</div>
       {billing && !finished ? (
         <span className="max-w-[42vw] truncate font-display text-xs font-bold italic text-primary sm:hidden">{billing}</span>
@@ -454,18 +599,39 @@ const isShot = (play: PlayByPlay) => play.result === "made" || play.result === "
 const isEvent = (play: PlayByPlay) => !isShot(play) && (play.foul || play.turnover)
 const pct = (value: number, span: number) => (value / span) * 100
 
-const fracOf = (value: number) => value - Math.floor(value)
-
-// A persistent spot for a non-shot possession (a drawn foul or a steal). These
-// have no shot location, so the mark surfaces right inside the ball-handler's
-// circle and stays there (hoverable) — a single in-circle indicator, both while
-// it happens and afterward. A tiny deterministic offset fans out repeated
-// fouls/steals by the same player so they don't stack on one pixel.
-function eventSpot(possession: number, side: "a" | "b") {
-  const home = PLAYER_HOME[side]
-  const a = fracOf(Math.sin((possession + 1) * 91.7))
-  const b = fracOf(Math.sin((possession + 1) * 47.3))
-  return { x: home.x + (a - 0.5) * 22, y: home.y + (b - 0.5) * 22 }
+// A persistent spot for a non-shot possession. These have no shot location, so
+// they're placed where the play would actually happen on the floor — NOT out at
+// the arc. A DRAWN FOUL hugs the rim/paint (drives, and-ones, post contact); a
+// TURNOVER sits in the paint-to-midrange handling area (strips, charges, bad
+// passes). Within each band, events are laid out by their ORDER (not a hash of
+// the possession number, which piled them up) via an R2 low-discrepancy
+// sequence, so any number of them fill the band evenly and stay separated. Each
+// player keeps to their own half (A above the rim line, B below) so the colour
+// isn't the only cue. Deterministic — a spot survives replays, scrubs, filters.
+const EVENT_BANDS: Record<
+  LiveEventKind,
+  Record<"a" | "b", { x: number; y: number; w: number; h: number }>
+> = {
+  // Drawn fouls: in and just outside the paint, right at the basket.
+  foul: {
+    a: { x: 62, y: 114, w: 118, h: 82 },
+    b: { x: 62, y: 204, w: 118, h: 82 },
+  },
+  // Turnovers: deeper paint out to the free-throw line / short midrange.
+  turnover: {
+    a: { x: 150, y: 110, w: 142, h: 86 },
+    b: { x: 150, y: 204, w: 142, h: 86 },
+  },
+}
+// 1/plastic and 1/plastic^2 — the R2 sequence's two irrational increments.
+const R2_A1 = 0.7548776662466927
+const R2_A2 = 0.5698402909980532
+function eventSpotByIndex(side: "a" | "b", kind: LiveEventKind, index: number) {
+  const band = EVENT_BANDS[kind][side]
+  const n = index + 1
+  const u = frac(0.5 + R2_A1 * n)
+  const v = frac(0.5 + R2_A2 * n)
+  return { x: band.x + u * band.w, y: band.y + v * band.h }
 }
 
 const FloorStage = memo(function FloorStage({
@@ -562,11 +728,10 @@ const FloorStage = memo(function FloorStage({
         const made = play.result === "made"
         const color = sideOf(play) === "a" ? colorA : colorB
         const isNewest = play.possession === currentPossession
-        // Fixed radius — never grow on hover (growing moves the hit ring out
-        // from under the cursor and causes the jitter). A separate, larger,
-        // invisible hit target makes both makes and the hollow misses easy and
-        // stable to acquire.
-        const radius = isNewest ? 7.5 : 6
+        // One fixed radius for every dot (newest included) so a settling dot
+        // never changes size — "newest" is signalled by the pulse ring + drop
+        // animation, not a size pop. A separate, larger, invisible hit target
+        // makes both makes and the hollow misses easy and stable to acquire.
         const isHover = play.possession === hovered
         return (
           <g
@@ -580,18 +745,44 @@ const FloorStage = memo(function FloorStage({
             onFocus={() => setHovered(play.possession)}
             onBlur={() => setHovered((v) => (v === play.possession ? null : v))}
           >
-            <circle cx={x} cy={y} r={14} fill="transparent" stroke="none" />
+            <circle cx={x} cy={y} r={HIT_R} fill="transparent" stroke="none" />
             {isNewest && showFx && !reduced && (
-              <circle cx={x} cy={y} r={13} fill="none" className="animate-pulse" style={{ stroke: color, pointerEvents: "none" }} strokeWidth={1.5} opacity={0.4} />
+              <circle cx={x} cy={y} r={DOT_R + HOVER_PAD + 2} fill="none" className="animate-pulse" style={{ stroke: color, pointerEvents: "none" }} strokeWidth={1.5} opacity={0.4} />
             )}
-            <circle cx={x} cy={y} r={radius} fill={made ? color : "none"} stroke={made ? "none" : color} strokeWidth={made ? 0 : 2.2} style={{ pointerEvents: "none" }} />
-            {isHover && <circle cx={x} cy={y} r={radius + 5} fill="none" style={{ stroke: color, pointerEvents: "none" }} strokeWidth={1.25} opacity={0.6} />}
+            <circle
+              cx={x}
+              cy={y}
+              r={DOT_R}
+              fill={made ? color : "none"}
+              stroke={made ? "none" : color}
+              strokeWidth={made ? 0 : 2.2}
+              style={{ pointerEvents: "none" }}
+              className={cn(isNewest && showFx && !reduced && "animate-dot-drop")}
+            />
+            {isHover && <circle cx={x} cy={y} r={DOT_R + HOVER_PAD} fill="none" style={{ stroke: color, pointerEvents: "none" }} strokeWidth={1.25} opacity={0.6} />}
           </g>
         )
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [shots, colorA, colorB, currentPossession, hovered, reduced, showFx, nameA]
   )
+
+  // Each event's spot, computed over the WHOLE game (not the revealed/filtered
+  // slice) and keyed by possession, so a player's k-th event always lands in
+  // the same sunflower slot regardless of how many are shown or whether the
+  // filter is on. Read by both the glyphs and the hover tooltip.
+  const eventSpots = useMemo(() => {
+    const map = new Map<number, { x: number; y: number }>()
+    const counts = { "a-foul": 0, "a-turnover": 0, "b-foul": 0, "b-turnover": 0 }
+    for (const play of plays) {
+      if (!isEvent(play)) continue
+      const side = sideOf(play)
+      const kind: LiveEventKind = play.turnover ? "turnover" : "foul"
+      map.set(play.possession, eventSpotByIndex(side, kind, counts[`${side}-${kind}`]++))
+    }
+    return map
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plays, nameA])
 
   // Non-shot possessions (drawn fouls, steals) left as persistent, hoverable
   // marks on the floor — same accumulation/filtering rules as the shot dots.
@@ -608,9 +799,12 @@ const FloorStage = memo(function FloorStage({
   const eventEls = useMemo(
     () =>
       events.map((play) => {
-        const side = sideOf(play)
-        const { x, y } = eventSpot(play.possession, side)
-        const color = play.turnover ? STEAL_RED : FOUL_AMBER
+        const { x, y } = eventSpots.get(play.possession) ?? PLAYER_HOME[sideOf(play)]
+        // Coloured by PLAYER (matching the shot dots), so the glyph's icon —
+        // whistle vs. steal-hand — is the only thing that signals foul vs.
+        // turnover, while the colour tells you whose it is.
+        const color = sideOf(play) === "a" ? colorA : colorB
+        const isNewest = play.possession === currentPossession
         const isHover = play.possession === hovered
         return (
           <g
@@ -624,14 +818,21 @@ const FloorStage = memo(function FloorStage({
             onFocus={() => setHovered(play.possession)}
             onBlur={() => setHovered((v) => (v === play.possession ? null : v))}
           >
-            <circle cx={x} cy={y} r={14} fill="transparent" stroke="none" />
-            <EventGlyph kind={play.turnover ? "turnover" : "foul"} cx={x} cy={y} r={8} color={color} />
-            {isHover && <circle cx={x} cy={y} r={13} fill="none" style={{ stroke: color, pointerEvents: "none" }} strokeWidth={1.25} opacity={0.6} />}
+            <circle cx={x} cy={y} r={HIT_R} fill="transparent" stroke="none" />
+            <EventGlyph
+              kind={play.turnover ? "turnover" : "foul"}
+              cx={x}
+              cy={y}
+              r={DOT_R}
+              color={color}
+              pop={isNewest && showFx && !reduced}
+            />
+            {isHover && <circle cx={x} cy={y} r={DOT_R + HOVER_PAD} fill="none" style={{ stroke: color, pointerEvents: "none" }} strokeWidth={1.25} opacity={0.6} />}
           </g>
         )
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [events, hovered, nameA]
+    [events, eventSpots, hovered, currentPossession, showFx, reduced, colorA, colorB, nameA]
   )
 
   const hoveredPlay =
@@ -644,15 +845,40 @@ const FloorStage = memo(function FloorStage({
   // The shot projectile — present only while a shot is in flight; a pure
   // function of the clock, so pause/scrub/speed all work for free.
   const shot = showFx && !reduced ? activeShotAt(clockSeconds, plays, timings) : null
+  const shotPlay = shot ? plays.find((p) => p.possession === shot.possession) : null
+  const shotColor = shotPlay && sideOf(shotPlay) === "a" ? colorA : colorB
 
+  // The non-shot flourish — a whistle's sound-rings for a drawn foul, a swipe +
+  // loose ball for a steal — at the event's spot, in the player's colour. Also
+  // a pure function of the clock.
+  const event = showFx && !reduced ? activeEventAt(clockSeconds, plays, timings) : null
+  const eventPlay = event ? plays.find((p) => p.possession === event.possession) : null
+  const eventXY = event ? eventSpots.get(event.possession) : null
+  const eventColor = eventPlay && sideOf(eventPlay) === "a" ? colorA : colorB
+
+  // The court is width-driven (w-full + the viewBox's aspect ratio), so it can
+  // never overflow its grid column and slide behind the play-by-play. Flat,
+  // straight-on — a printed diagram, per the design system (no camera tilt).
   return (
-    <div className="relative mx-auto aspect-[564/400] w-full max-w-[680px] lg:h-full lg:w-auto lg:max-w-none">
-      {/* Only the court (and its tilted plane) is clipped; tooltips live outside
-          this box so they're never cut off at the court border. */}
-      <div className="court-cam absolute inset-0 overflow-hidden rounded-sm border bg-muted/15">
-        <div className="court-floor absolute inset-0">
-          <svg viewBox={COURT_VIEWBOX} className="absolute inset-0 h-full w-full" preserveAspectRatio="xMidYMid meet">
-            <CourtLines />
+    <div className="relative mx-auto aspect-[564/400] w-full max-w-[680px] lg:max-w-none">
+      {/* Square-cornered, solid floor with a SINGLE hairline frame (the court's
+          outer boundary line is drawn by this border, not also by CourtLines).
+          Atmosphere is the IDENTICAL halftone field the ISO Lab player cards use
+          — the .halftone-splash corner-bleed mask (dense top-right, dissolving
+          bottom-left) overridden to the same finer 9px grid / 1.4px dots — only
+          the dot colour stays the neutral theme token instead of a team hue. */}
+      <div className="absolute inset-0 overflow-hidden border bg-muted/20">
+        <span
+          aria-hidden
+          className="halftone-splash pointer-events-none absolute inset-0"
+          style={{
+            backgroundImage:
+              "radial-gradient(var(--splash-dot) 1.4px, transparent 1.9px)",
+            backgroundSize: "9px 9px",
+          }}
+        />
+        <svg viewBox={COURT_VIEWBOX} className="absolute inset-0 h-full w-full" preserveAspectRatio="xMidYMid meet">
+          <CourtLines />
           {heatEls}
           {/* Nothing populates the floor until tip-off — the court stays empty
               under the 3-2-1 countdown rather than showing the players (and
@@ -662,14 +888,19 @@ const FloorStage = memo(function FloorStage({
               {dotEls}
               {eventEls}
 
-              {/* The shot projectile: a thin trace + ball head, colored by outcome
-                  (orange make / red miss); a make briefly lights the net orange. */}
-              {shot && <ShotFx shot={shot} />}
+              {/* The shot in flight: an ink trace in the shooter's accent —
+                  solid for a make, dashed for a miss — and, on a make, a rim
+                  flash + ripple + a small burst of action ticks. */}
+              {shot && <ShotFx shot={shot} color={shotColor} />}
+
+              {/* The non-shot flourish: a blown whistle (foul) or a loose
+                  ball (steal), fired at the moment the event happens. */}
+              {event && eventXY && (
+                <EventFx kind={event.kind} x={eventXY.x} y={eventXY.y} color={eventColor} t={event.t} />
+              )}
             </>
           )}
-          </svg>
-        </div>
-        <span aria-hidden className="halftone halftone-fade pointer-events-none absolute inset-0 opacity-20" />
+        </svg>
       </div>
 
       {hoveredPlay && (
@@ -678,7 +909,7 @@ const FloorStage = memo(function FloorStage({
           color={sideOf(hoveredPlay) === "a" ? colorA : colorB}
           at={
             isEvent(hoveredPlay)
-              ? eventSpot(hoveredPlay.possession, sideOf(hoveredPlay))
+              ? eventSpots.get(hoveredPlay.possession) ?? PLAYER_HOME[sideOf(hoveredPlay)]
               : shotPoint(hoveredPlay.shot_zone_basic, hoveredPlay.shot_zone_area, hoveredPlay.possession)
           }
         />
@@ -694,18 +925,18 @@ function ZoneDetail({ zoneKey, split }: { zoneKey: string; split: ZoneSplit }) {
   if (!pos) return null
   const fg = zoneFgPct(split)
   const grade = gradeZone(bandFromBasic(basic), fg, split.att)
-  const left = Math.min(82, Math.max(18, pct(pos.x, 564)))
-  const above = pos.y > 200
+  const left = Math.min(82, Math.max(18, pct(pos.x, COURT_W)))
+  const above = pos.y > COURT_H / 2
   return (
     <div
-      className="pointer-events-none absolute z-20 w-max max-w-[70%] -translate-x-1/2 rounded-sm border border-border bg-background/95 px-2.5 py-1.5 shadow-md"
-      style={{ left: `${left}%`, top: `${pct(pos.y, 400)}%`, transform: `translate(-50%, ${above ? "calc(-100% - 10px)" : "10px"})` }}
+      className="pointer-events-none absolute z-20 w-max max-w-[70%] -translate-x-1/2 rounded-sm border border-border bg-background/95 px-2.5 py-1.5 shadow-sm"
+      style={{ left: `${left}%`, top: `${pct(pos.y, COURT_H)}%`, transform: `translate(-50%, ${above ? "calc(-100% - 10px)" : "10px"})` }}
     >
       <div className="flex items-center gap-1.5">
         <span className="size-2 shrink-0 rounded-sm" style={{ backgroundColor: grade.stroke }} />
         <span className="truncate display text-sm leading-none">{basic} · {area}</span>
       </div>
-      <div className="mt-1 flex items-center gap-2 font-condensed text-[0.68rem] font-bold uppercase tracking-[0.1em] text-muted-foreground tabular-nums">
+      <div className="mt-1 flex items-center gap-2 kicker text-muted-foreground tabular-nums">
         <span>{split.made}/{split.att} FG</span>
         <span className="text-foreground">{formatPct(fg)}</span>
       </div>
@@ -713,11 +944,21 @@ function ZoneDetail({ zoneKey, split }: { zoneKey: string; split: ZoneSplit }) {
   )
 }
 
-function ShotFx({ shot }: { shot: ActiveShot }) {
-  const { launch, control, end, made, arcT, fadeT } = shot
-  // Color the whole shot line by its outcome — orange on the way to a make,
-  // red on the way to a miss — so the result reads straight off the arc.
-  const traceColor = made ? SHOT_ORANGE : SHOT_RED
+// The shot in flight, drawn like a printer's diagram of a play: a thin ink
+// trace in the shooter's accent color — solid when it's going in, dashed when
+// it isn't (the print convention for a path not taken) — with a small ball head
+// riding the arc.
+//
+// The landing is where the print character lives, and both outcomes are pure
+// functions of the clock (no keyed CSS), so pause / scrub / speed replay them:
+// — A MAKE drops THROUGH the hoop: seen from above, the ball shrinks away into
+//   the ring while the rim flashes, one ink ripple rolls outward (a stone in
+//   water), and a burst of short radial action ticks — the comic-print "pow" —
+//   fires around the iron. A three earns a bigger burst than a two.
+// — A MISS contacts the rim at its per-possession point (front iron, side rim;
+//   see shotArc) and CAROMS radially off it with a little hop before fading.
+function ShotFx({ shot, color }: { shot: ActiveShot; color: string }) {
+  const { possession, launch, control, end, made, three, arcT, fadeT } = shot
   // The trace: sample the arc from the launch up to the current flight progress.
   const steps = 18
   const maxT = Math.max(arcT, 0.001)
@@ -727,30 +968,104 @@ function ShotFx({ shot }: { shot: ActiveShot }) {
     d += `${s === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)} `
   }
   const head = quadAt(launch, control, end, arcT)
-  const traceOpacity = 0.9 * (1 - fadeT)
+  const traceOpacity = 0.85 * (1 - fadeT)
+  const kick = frac(Math.sin((possession + 1) * 31.7))
+
+  // Make: burst eases out hard so the pow lands instantly, then relaxes.
+  const burst = 1 - (1 - fadeT) ** 2.2
+  const tickCount = three ? 12 : 8
+  const ticks = Array.from({ length: tickCount }, (_, i) => {
+    const angle = (i / tickCount) * Math.PI * 2 + kick * 0.6
+    // Per-tick deterministic length so the burst reads hand-set, not mechanical.
+    const len =
+      (three ? 12 : 8) * (0.6 + 0.8 * frac(Math.sin((possession + 1) * 7.3 + i * 3.1)))
+    const r0 = RIM_R + 4 + 10 * burst
+    const r1 = r0 + len * (0.3 + 0.7 * burst)
+    return {
+      x1: HOOP.x + Math.cos(angle) * r0,
+      y1: HOOP.y + Math.sin(angle) * r0,
+      x2: HOOP.x + Math.cos(angle) * r1,
+      y2: HOOP.y + Math.sin(angle) * r1,
+    }
+  })
+
+  // Miss: the carom kicks radially off whichever part of the iron the ball hit
+  // (end varies per possession — front rim, side rim…), with a touch of spin
+  // and a small parabolic hop, decelerating as it dies. Clamped to the floor.
+  const bounceT = 1 - (1 - fadeT) ** 2
+  const out = Math.atan2(end.y - HOOP.y, end.x - HOOP.x)
+  const caromDir = out + (kick - 0.5) * 1.1
+  const caromDist = (20 + kick * 16) * bounceT
+  const caromX = Math.max(8, Math.min(COURT_W - 8, end.x + Math.cos(caromDir) * caromDist))
+  const caromY =
+    Math.max(8, Math.min(COURT_H - 8, end.y + Math.sin(caromDir) * caromDist)) -
+    10 * 4 * bounceT * (1 - bounceT)
+
   return (
     <g style={{ pointerEvents: "none" }}>
+      {/* The trace scales WITH the court (no non-scaling-stroke): it's the
+          star of the animation, not a hairline of the diagram, so it should
+          read clearly at the rendered size. */}
       <path
         d={d}
         fill="none"
-        stroke={traceColor}
-        strokeWidth={1.4}
+        stroke={color}
+        strokeWidth={1.8}
+        strokeDasharray={made ? undefined : "5 4"}
         strokeLinecap="round"
-        vectorEffect="non-scaling-stroke"
         opacity={traceOpacity}
       />
-      {arcT < 1 && <circle cx={head.x} cy={head.y} r={3.2} fill={traceColor} opacity={1 - fadeT} />}
-      {/* A make lights the net orange through the brief fade window (~0.5s at 1x),
-          then it settles back to the floor color; a miss leaves the net untouched.
-          No ripple. */}
-      {made && fadeT > 0 && (
-        <circle
-          cx={HOOP.x}
-          cy={HOOP.y}
-          r={RIM_R}
-          fill={SHOT_ORANGE}
-          opacity={0.9 * (1 - fadeT)}
-        />
+      {arcT < 1 && (
+        <circle cx={head.x} cy={head.y} r={BALL_R} fill={color} opacity={1 - fadeT} />
+      )}
+      {made && arcT >= 1 && (
+        <>
+          {/* The ball falls through the hoop — from a bird's eye it shrinks away. */}
+          <circle
+            cx={HOOP.x}
+            cy={HOOP.y}
+            r={BALL_R * Math.max(0, 1 - fadeT / 0.35)}
+            fill={color}
+          />
+          {/* Rim flash + one ink ripple rolling outward. */}
+          <circle
+            cx={HOOP.x}
+            cy={HOOP.y}
+            r={RIM_R}
+            fill="none"
+            stroke={color}
+            strokeWidth={2.4}
+            opacity={0.9 * (1 - fadeT)}
+          />
+          <circle
+            cx={HOOP.x}
+            cy={HOOP.y}
+            r={RIM_R + 22 * burst}
+            fill="none"
+            stroke={color}
+            strokeWidth={1.2}
+            vectorEffect="non-scaling-stroke"
+            opacity={0.5 * (1 - fadeT)}
+          />
+          {/* The action-tick burst around the iron. */}
+          {ticks.map((tick, i) => (
+            <line
+              key={i}
+              x1={tick.x1}
+              y1={tick.y1}
+              x2={tick.x2}
+              y2={tick.y2}
+              stroke={color}
+              strokeWidth={1.4}
+              strokeLinecap="round"
+              vectorEffect="non-scaling-stroke"
+              opacity={0.85 * (1 - fadeT)}
+            />
+          ))}
+        </>
+      )}
+      {!made && arcT >= 1 && (
+        <circle cx={caromX} cy={caromY} r={BALL_R} fill={color} opacity={1 - fadeT} />
       )}
     </g>
   )
@@ -772,42 +1087,118 @@ function WhistleIcon({
 }) {
   return (
     <svg x={x} y={y} width={size} height={size} viewBox="0 0 24 24">
-      <rect x="2" y="8.5" width="9" height="5" rx="2" fill="#fff" />
-      <rect x="12" y="3.6" width="3" height="3.6" rx="1.5" fill="#fff" />
-      <circle cx="13.5" cy="13" r="7.5" fill="#fff" />
+      <rect x="2" y="8.5" width="9" height="5" rx="2" fill="var(--primary-foreground)" />
+      <rect x="12" y="3.6" width="3" height="3.6" rx="1.5" fill="var(--primary-foreground)" />
+      <circle cx="13.5" cy="13" r="7.5" fill="var(--primary-foreground)" />
       <circle cx="13.5" cy="13" r="3.1" fill={bg} />
     </svg>
   )
 }
 
-// The icon-in-a-disc itself: a filled, white-ringed coin carrying the whistle
-// (foul) or lucide Grab (steal). Shared by the persistent floor mark and the
-// live pop, so the two always look identical.
+// The icon-in-a-disc itself: a filled player-colour coin carrying the whistle
+// (foul) or lucide Grab (steal) in the on-accent ink. Shared by the persistent
+// floor mark and the live pop, so the two always look identical. `pop` drops it
+// in with a squash (the newest event during live playback).
 function EventGlyph({
   kind,
   cx,
   cy,
   r,
   color,
+  pop,
 }: {
   kind: LiveEventKind
   cx: number
   cy: number
   r: number
   color: string
+  pop?: boolean
 }) {
   // Pad the icon well inside the disc so it never overflows the rim. The line-art
   // Grab fills its viewBox to the corners, so it needs more padding than the
   // custom (tighter) whistle.
   const size = r * (kind === "foul" ? 1.55 : 1.25)
   return (
-    <g style={{ pointerEvents: "none" }}>
-      <circle cx={cx} cy={cy} r={r} fill={color} stroke="#fff" strokeWidth={1.3} />
+    <g style={{ pointerEvents: "none" }} className={cn(pop && "animate-dot-drop")}>
+      <circle cx={cx} cy={cy} r={r} fill={color} />
       {kind === "foul" ? (
         <WhistleIcon x={cx - size / 2} y={cy - size / 2} size={size} bg={color} />
       ) : (
-        <Grab x={cx - size / 2} y={cy - size / 2} width={size} height={size} color="#fff" strokeWidth={2.4} />
+        <Grab x={cx - size / 2} y={cy - size / 2} width={size} height={size} color="var(--primary-foreground)" strokeWidth={2.2} />
       )}
+    </g>
+  )
+}
+
+// The live flourish for a non-shot possession — fired by the clock while the
+// event happens (see activeEventAt). A FOUL blows the whistle: the whistle disc
+// swells and shakes (drawn on top of the resting glyph it matches), with a
+// couple of faint air-rings puffing off it. A STEAL pops the ball loose: it
+// bounces away from the ball-handler and rolls out, fading. `t` is 0..1 across
+// the flourish; everything derives from it, so a scrub back replays it exactly.
+// In the player's colour.
+function EventFx({
+  kind,
+  x,
+  y,
+  color,
+  t,
+}: {
+  kind: LiveEventKind
+  x: number
+  y: number
+  color: string
+  t: number
+}) {
+  const s = eventSwell(t)
+  if (kind === "foul") {
+    // Wobble: the whistle ROTATES back and forth a few degrees, decaying — it
+    // reads as the whistle being blown, not sliding around.
+    const rot = Math.sin(t * 17) * 12 * (1 - t)
+    return (
+      <g style={{ pointerEvents: "none" }}>
+        {[0, 1, 2].map((i) => {
+          // An unhurried pulse: each ring expands across most of the window,
+          // staggered, so the rings read as a slow ripple rather than a blip.
+          const tt = clamp01((t - i * 0.18) / 0.8)
+          if (tt <= 0 || tt >= 1) return null
+          return (
+            <circle
+              key={i}
+              cx={x}
+              cy={y}
+              r={DOT_R + 2 + tt * 22}
+              fill="none"
+              stroke={color}
+              strokeWidth={1.4 * (1 - tt)}
+              vectorEffect="non-scaling-stroke"
+              opacity={0.45 * (1 - tt)}
+            />
+          )
+        })}
+        {/* Spin the whistle in place, then swell it about its centre. */}
+        <g transform={`rotate(${rot} ${x} ${y}) ${scaleAbout(x, y, s)}`}>
+          <EventGlyph kind="foul" cx={x} cy={y} r={DOT_R} color={color} />
+        </g>
+      </g>
+    )
+  }
+
+  // Steal: the hand glyph gives the same quick swell as the whistle, while the
+  // ball pops loose and bounces away from the ball-handler, hopping with decaying
+  // height and fading as it rolls out.
+  const roll = clamp01(t)
+  const ballX = x + 34 * roll
+  const ballY = y - Math.abs(Math.sin(roll * Math.PI * 2.4)) * 10 * (1 - roll)
+  const op = 1 - clamp01((roll - 0.65) / 0.35)
+  return (
+    <g style={{ pointerEvents: "none" }}>
+      {roll > 0 && roll < 1 && (
+        <circle cx={ballX} cy={ballY} r={DOT_R * 0.6} fill={color} opacity={op} />
+      )}
+      <g transform={scaleAbout(x, y, s)}>
+        <EventGlyph kind="turnover" cx={x} cy={y} r={DOT_R} color={color} />
+      </g>
     </g>
   )
 }
@@ -831,7 +1222,7 @@ function CountdownOverlay({
   return (
     <div
       aria-hidden
-      className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 rounded-sm bg-background/70 backdrop-blur-sm"
+      className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 rounded-sm bg-background/85"
     >
       <div className="flex items-center gap-3 sm:gap-4">
         <span className="display text-2xl sm:text-4xl" style={{ color: colorA }}>
@@ -867,18 +1258,18 @@ function ShotTooltip({ play, color, at }: { play: PlayByPlay; color: string; at:
   const { x, y } = at
   const shot = isShot(play)
   const made = play.result === "made"
-  const left = Math.min(82, Math.max(18, pct(x, 564)))
-  const above = y > 200
+  const left = Math.min(82, Math.max(18, pct(x, COURT_W)))
+  const above = y > COURT_H / 2
   return (
     <div
-      className="pointer-events-none absolute z-20 w-max max-w-[70%] -translate-x-1/2 rounded-sm border border-border bg-background/95 px-2.5 py-1.5 shadow-md"
-      style={{ left: `${left}%`, top: `${pct(y, 400)}%`, transform: `translate(-50%, ${above ? "calc(-100% - 10px)" : "10px"})` }}
+      className="pointer-events-none absolute z-20 w-max max-w-[70%] -translate-x-1/2 rounded-sm border border-border bg-background/95 px-2.5 py-1.5 shadow-sm"
+      style={{ left: `${left}%`, top: `${pct(y, COURT_H)}%`, transform: `translate(-50%, ${above ? "calc(-100% - 10px)" : "10px"})` }}
     >
       <div className="flex items-center gap-1.5">
         <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
         <span className="truncate display text-sm leading-none">{play.offensive_player}</span>
       </div>
-      <div className="mt-1 flex items-center gap-2 font-condensed text-[0.68rem] font-bold uppercase tracking-[0.1em] text-muted-foreground">
+      <div className="mt-1 flex items-center gap-2 kicker text-muted-foreground">
         <span className="capitalize">{shotDescriptor(play)}</span>
         {shot && (
           <span className={cn(made ? "text-primary" : "text-muted-foreground")}>{made ? `Make · +${pointsForPlay(play)}` : "Miss"}</span>
@@ -895,16 +1286,22 @@ function ShotTooltip({ play, color, at }: { play: PlayByPlay; color: string; at:
 /* Transport                                                                  */
 /* -------------------------------------------------------------------------- */
 
-function Transport({ live, autoSkip, onAutoSkip }: { live: Live; autoSkip: boolean; onAutoSkip: (value: boolean) => void }) {
+function Transport({ live }: { live: Live }) {
   return (
-    <div className="flex items-center gap-2 sm:gap-3">
-      <Button variant="default" size="icon" onClick={live.togglePlay} aria-label={live.playing ? "Pause" : "Play"} className="shrink-0">
+    // A proper deck for the playback controls — flat hairline card, like every
+    // other panel on the page, instead of controls floating loose on the paper.
+    <div className="flex items-center gap-2 rounded-sm border bg-card px-3 py-2 sm:gap-3">
+      <Button variant="default" size="icon" onClick={live.togglePlay} aria-label={live.playing ? "Pause" : "Play"} className="size-8 shrink-0">
         {live.playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
       </Button>
-      <Button variant="outline" size="icon" onClick={live.restart} aria-label="Restart" className="hidden shrink-0 sm:inline-flex">
+      <Button variant="outline" size="icon" onClick={live.restart} aria-label="Restart" className="hidden size-8 shrink-0 sm:inline-flex">
         <RotateCcw className="h-4 w-4" />
       </Button>
-      <span className="hidden shrink-0 font-display text-sm font-bold tabular-nums text-muted-foreground sm:block">
+      {/* Fixed-width clock: the readout's digit count changes as time rolls
+          (0:09 → 0:10 → 10:00), and a self-sizing label kept resizing the
+          flex row, making the scrub bar flicker. The box is sized to the
+          widest possible reading so the bar's width never moves. */}
+      <span className="hidden w-[7.25rem] shrink-0 justify-center font-display text-sm font-bold tabular-nums text-muted-foreground sm:inline-flex">
         {formatClock(live.clockSeconds)} / {formatClock(live.totalSeconds)}
       </span>
       <input
@@ -916,7 +1313,14 @@ function Transport({ live, autoSkip, onAutoSkip }: { live: Live; autoSkip: boole
         aria-label="Scrub game"
         className="h-1.5 flex-1 cursor-pointer accent-primary"
       />
-      <div className="hidden shrink-0 items-center gap-0.5 rounded-sm border p-0.5 sm:flex">
+      {/* Segmented speed control — the site's neutral toggle pattern (active =
+          ink fill), so the single vermillion accent stays reserved for the
+          primary play button and isn't spent on a speed picker. */}
+      <div
+        role="group"
+        aria-label="Playback speed"
+        className="hidden h-8 shrink-0 items-center gap-0.5 rounded-sm border border-border bg-background p-0.5 sm:flex"
+      >
         {SPEEDS.map((speed) => (
           <button
             key={speed}
@@ -924,44 +1328,37 @@ function Transport({ live, autoSkip, onAutoSkip }: { live: Live; autoSkip: boole
             aria-pressed={live.speed === speed}
             className={cn(
               "rounded-[0.15rem] px-2 py-1 font-condensed text-xs font-bold uppercase tracking-[0.1em] tabular-nums transition-colors",
-              live.speed === speed ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              live.speed === speed
+                ? "bg-foreground text-background"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
             )}
           >
             {speed}×
           </button>
         ))}
       </div>
-      <button
-        onClick={() => onAutoSkip(!autoSkip)}
-        aria-pressed={autoSkip}
-        title="Skip the per-shot animations, keep the play-by-play"
-        className={cn(
-          "hidden shrink-0 items-center gap-1.5 rounded-sm border px-2.5 py-1.5 font-condensed text-xs font-bold uppercase tracking-[0.1em] transition-colors sm:inline-flex",
-          autoSkip ? "border-primary bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
-        )}
-      >
-        {autoSkip ? <Zap className="h-3.5 w-3.5" /> : <Gauge className="h-3.5 w-3.5" />}
-        Auto-skip
-      </button>
-      <Button variant="secondary" onClick={live.skip} className="shrink-0 font-condensed font-bold uppercase tracking-[0.12em]">
+      <Button variant="outline" onClick={live.skip} className="h-8 shrink-0 whitespace-nowrap px-3 font-condensed font-bold uppercase tracking-[0.12em]">
         <SkipForward className="h-4 w-4" />
-        Skip
+        Skip to end
       </Button>
     </div>
   )
 }
 
 /* -------------------------------------------------------------------------- */
-/* Live box                                                                   */
+/* The game box — live box while playing, the Game Story when settled         */
 /* -------------------------------------------------------------------------- */
 
-const LiveBox = memo(function LiveBox({
+const GameBox = memo(function GameBox({
   plays,
   revealedCount,
   nameA,
   nameB,
   colorA,
   colorB,
+  finished,
+  summary,
+  warningsSlot,
 }: {
   plays: PlayByPlay[]
   revealedCount: number
@@ -969,42 +1366,111 @@ const LiveBox = memo(function LiveBox({
   nameB: string
   colorA: string
   colorB: string
+  finished: boolean
+  summary: MatchSummary | null
+  warningsSlot?: ReactNode
 }) {
   const box = useMemo(() => boxScoreThrough(plays, revealedCount), [plays, revealedCount])
+  const winnerName = summary
+    ? summary.final_score.a >= summary.final_score.b
+      ? nameA
+      : nameB
+    : null
+  // A real <table> whose header and body are generated from ONE column spec, so
+  // every label sits dead-centre over its figures — there is no way for the two
+  // to drift apart (the old hand-written header/body pair could, and did). Each
+  // stat column is centre-aligned in a fixed-width cell, with roomy padding so
+  // the row reads like a printed box score, not a cramped grid.
   return (
     <div className="shrink-0 overflow-hidden rounded-sm border">
-      <div className="grid grid-cols-[1fr_auto_auto_auto_auto_auto] gap-x-3 border-b bg-muted/30 px-3 py-1 font-condensed text-[0.6rem] font-bold uppercase tracking-[0.1em] text-muted-foreground">
-        <span>Live Box</span>
-        <span className="text-right tabular-nums">PTS</span>
-        <span className="text-right tabular-nums">FG</span>
-        <span className="text-right tabular-nums">3PT</span>
-        <span className="text-right tabular-nums">TO</span>
-        <span className="text-right tabular-nums">FD</span>
-      </div>
-      <BoxRow name={nameA} color={colorA} line={box[nameA] ?? emptyStatLine()} />
-      <BoxRow name={nameB} color={colorB} line={box[nameB] ?? emptyStatLine()} />
+      <table className="w-full border-collapse">
+        <thead>
+          <tr className="border-b bg-muted/30">
+            <th scope="col" className="w-full px-3 py-2 text-left font-normal">
+              <span className="flex items-center gap-1.5 kicker text-muted-foreground">
+                {finished ? "The Game Story" : "Live Box Score"}
+                {finished && warningsSlot}
+              </span>
+            </th>
+            {/* The kicker class sets display:inline-flex, which would strip the
+                <th> of its table-cell display and collapse the column layout —
+                so it lives on an inner <span>, never the cell itself. */}
+            {BOX_COLUMNS.map((c) => (
+              <th
+                key={c.label}
+                scope="col"
+                className={cn("min-w-[3rem] px-2 py-2 text-center align-middle", c.hideClass)}
+              >
+                <span className="kicker text-muted-foreground">{c.label}</span>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          <BoxRow name={nameA} color={colorA} line={box[nameA] ?? emptyStatLine()} winner={winnerName === nameA} />
+          <BoxRow name={nameB} color={colorB} line={box[nameB] ?? emptyStatLine()} winner={winnerName === nameB} />
+        </tbody>
+      </table>
     </div>
   )
 })
 
-function BoxRow({ name, color, line }: { name: string; color: string; line: LiveStatLine }) {
+// The single source of truth for the box-score columns: label + how to read the
+// figure off a stat line + which (if any) breakpoint hides it. Header and body
+// both map over this, so they can never disagree.
+const BOX_COLUMNS: {
+  label: string
+  get: (line: LiveStatLine) => string | number
+  hideClass?: string
+  accent?: boolean
+}[] = [
+  { label: "PTS", get: (l) => l.points, accent: true },
+  { label: "FG", get: (l) => `${l.fgm}/${l.fga}` },
+  { label: "3PT", get: (l) => `${l.threePm}/${l.threePa}` },
+  { label: "Rim", get: (l) => `${l.rimMade}/${l.rimAtt}`, hideClass: "hidden sm:table-cell" },
+  { label: "Mid", get: (l) => `${l.midMade}/${l.midAtt}`, hideClass: "hidden sm:table-cell" },
+  { label: "TO", get: (l) => l.turnovers },
+  { label: "FD", get: (l) => l.foulsDrawn },
+]
+
+function BoxRow({
+  name,
+  color,
+  line,
+  winner,
+}: {
+  name: string
+  color: string
+  line: LiveStatLine
+  winner: boolean
+}) {
   return (
-    <div className="grid grid-cols-[1fr_auto_auto_auto_auto_auto] items-center gap-x-3 px-3 py-1.5">
-      <span className="flex min-w-0 items-center gap-1.5">
-        <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
-        <span className="truncate display text-sm leading-none">{name}</span>
-      </span>
-      <span className="text-right font-display text-sm font-bold tabular-nums" style={{ color }}>{line.points}</span>
-      <span className="text-right font-display text-sm font-bold tabular-nums">{line.fgm}/{line.fga}</span>
-      <span className="text-right font-display text-sm font-bold tabular-nums">{line.threePm}/{line.threePa}</span>
-      <span className="text-right font-display text-sm font-bold tabular-nums">{line.turnovers}</span>
-      <span className="text-right font-display text-sm font-bold tabular-nums">{line.foulsDrawn}</span>
-    </div>
+    <tr className={cn(winner && "bg-primary/5")}>
+      <td className="px-3 py-2.5">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+          <span className={cn("truncate display text-sm leading-none", winner && "text-primary")}>{name}</span>
+          {winner && <span className="shrink-0 kicker leading-none text-primary">Winner</span>}
+        </span>
+      </td>
+      {BOX_COLUMNS.map((c) => (
+        <td
+          key={c.label}
+          className={cn(
+            "min-w-[3rem] px-2 py-2.5 text-center font-display text-sm font-bold tabular-nums",
+            c.hideClass
+          )}
+          style={c.accent ? { color } : undefined}
+        >
+          {c.get(line)}
+        </td>
+      ))}
+    </tr>
   )
 }
 
 /* -------------------------------------------------------------------------- */
-/* The Odds (live win probability)                                            */
+/* Win probability (this game)                                                */
 /* -------------------------------------------------------------------------- */
 
 function OddsGraph({
@@ -1069,7 +1535,9 @@ function OddsGraph({
   return (
     <div className="p-3">
       <div className="mb-1.5 flex items-center justify-between">
-        <Kicker tone="muted">The Odds</Kicker>
+        {/* "Win Probability", not "The Odds" — that name belongs to the
+            1,000-simulation verdict; this curve is this one game only. */}
+        <Kicker tone="muted">Win Probability</Kicker>
         <span className="kicker tabular-nums">
           <span style={{ color: favorsA ? colorA : colorB }}>
             {lastName(favorsA ? nameA : nameB)} {favPct}%
@@ -1109,57 +1577,11 @@ function OddsGraph({
           enriched.slice(0, shownCount).map((e, i) => (e.leadChange ? <circle key={i} cx={xOf(i)} cy={yOf(pts[i])} r={2.5} className="fill-primary" /> : null))}
         {hover != null && <line x1={xOf(hover)} y1={0} x2={xOf(hover)} y2={H} className="stroke-foreground/40" vectorEffect="non-scaling-stroke" />}
       </svg>
-      <div className="mt-1 kicker text-muted-foreground/70">Model estimate — race-to-21 odds, not a prediction</div>
-    </div>
-  )
-}
-
-/* -------------------------------------------------------------------------- */
-/* Shooting splits (final comparison)                                         */
-/* -------------------------------------------------------------------------- */
-
-function ShootingSplits({ plays, nameA, nameB, colorA, colorB }: { plays: PlayByPlay[]; nameA: string; nameB: string; colorA: string; colorB: string }) {
-  const box = useMemo(() => boxScoreThrough(plays, plays.length), [plays])
-  return (
-    <div className="p-3">
-      <Kicker tone="muted">Shooting Splits</Kicker>
-      <div className="mt-2 grid grid-cols-2 gap-3">
-        <SplitColumn name={nameA} color={colorA} line={box[nameA] ?? emptyStatLine()} />
-        <SplitColumn name={nameB} color={colorB} line={box[nameB] ?? emptyStatLine()} />
+      <div className="mt-1 kicker text-muted-foreground/70">
+        {finished
+          ? "The model's race-to-21 read, recomputed every possession — click the curve to replay from there"
+          : "The model's race-to-21 read, recomputed every possession"}
       </div>
-    </div>
-  )
-}
-
-function SplitColumn({ name, color, line }: { name: string; color: string; line: LiveStatLine }) {
-  const rows = [
-    { label: "Rim", made: line.rimMade, att: line.rimAtt },
-    { label: "Mid", made: line.midMade, att: line.midAtt },
-    { label: "3PT", made: line.threePm, att: line.threePa },
-  ]
-  return (
-    <div className="space-y-2">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="truncate display text-sm leading-none">{lastName(name)}</span>
-        <span className="font-display text-lg font-bold tabular-nums" style={{ color }}>{line.points}</span>
-      </div>
-      {rows.map((row) => {
-        const p = row.att ? Math.round((row.made / row.att) * 100) : 0
-        return (
-          <div key={row.label} className="space-y-1">
-            <div className="flex items-baseline justify-between font-condensed text-[0.66rem] font-bold uppercase tracking-[0.08em] text-muted-foreground">
-              <span>{row.label}</span>
-              <span className="tabular-nums text-foreground">
-                {row.made}/{row.att}
-                <span className="ml-1 text-muted-foreground">{row.att ? `${p}%` : "—"}</span>
-              </span>
-            </div>
-            <div className="h-1 overflow-hidden rounded-full bg-muted">
-              <div className="h-full rounded-full" style={{ width: `${p}%`, backgroundColor: color }} />
-            </div>
-          </div>
-        )
-      })}
     </div>
   )
 }
@@ -1215,7 +1637,7 @@ const WireFeed = memo(function WireFeed({
   const rows = finished ? enriched : enriched.slice(0, revealedCount)
 
   return (
-    <div className="flex min-h-0 flex-col overflow-hidden rounded-sm border">
+    <div className="absolute inset-0 flex flex-col overflow-hidden rounded-sm border">
       <div className="flex shrink-0 items-center justify-between border-b px-3 py-2">
         <Kicker tone="muted">The Play-by-Play</Kicker>
         <span className="kicker tabular-nums text-muted-foreground">{finished ? enriched.length : revealedCount}/{enriched.length}</span>
@@ -1235,7 +1657,7 @@ const WireFeed = memo(function WireFeed({
           />
         ))}
         {rows.length === 0 && (
-          <li className="px-3 py-3 font-condensed text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground">Tip-off…</li>
+          <li className="px-3 py-3 kicker text-muted-foreground">Tip-off…</li>
         )}
       </ul>
       <div className="shrink-0 border-t">{footer}</div>
@@ -1274,7 +1696,7 @@ function WireRow({
         onClick={onClick}
         aria-label={`Jump to possession ${play.possession}`}
         className={cn("flex w-full items-center gap-2 border-b border-border/50 px-3 py-1.5 text-left transition-colors hover:bg-muted/50", current && "bg-muted")}
-        style={{ boxShadow: `inset 3px 0 0 0 ${current ? color : color + "33"}` }}
+        style={{ boxShadow: `inset 3px 0 0 0 ${current ? color : `color-mix(in srgb, ${color} 20%, transparent)`}` }}
       >
         <span className="w-9 shrink-0 font-display text-xs font-bold tabular-nums text-muted-foreground">{clock}</span>
         <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
@@ -1329,21 +1751,6 @@ function FilterToggle({
   )
 }
 
-function resolvePalette(accentA?: string | null, accentB?: string | null): { colorA: string; colorB: string } {
-  const a = accentA || VERMILLION
-  const b = accentB || SLATE
-  if (!accentA || !accentB || colorDistance(a, b) < 95) {
-    return { colorA: VERMILLION, colorB: SLATE }
-  }
-  return { colorA: a, colorB: b }
-}
-
-function colorDistance(a: string, b: string): number {
-  const ra = hexToRgb(a)
-  const rb = hexToRgb(b)
-  return Math.sqrt((ra[0] - rb[0]) ** 2 + (ra[1] - rb[1]) ** 2 + (ra[2] - rb[2]) ** 2)
-}
-
 function initials(name: string): string {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("")
 }
@@ -1351,22 +1758,6 @@ function initials(name: string): string {
 function lastName(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
   return parts[parts.length - 1] ?? name
-}
-
-function usePersistentToggle(key: string): [boolean, (value: boolean) => void] {
-  const [value, setValue] = useState(() => {
-    if (typeof window === "undefined") return false
-    return window.localStorage.getItem(key) === "1"
-  })
-  const set = (next: boolean) => {
-    setValue(next)
-    try {
-      window.localStorage.setItem(key, next ? "1" : "0")
-    } catch {
-      /* ignore */
-    }
-  }
-  return [value, set]
 }
 
 function usePrefersReducedMotion(): boolean {

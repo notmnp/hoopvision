@@ -309,6 +309,10 @@ class SimulationEngine:
         each possession (see _simulate_possession) into the probabilities of
         {turnover, foul (retry), made 2, made 3, miss}, reusing the exact
         contest helpers so the win-probability agrees with the simulation.
+
+        Because the engine checks turnover first and foul only on no-turnover,
+        the reported foul term is the actual per-possession probability
+        (1 - turnover) * foul_rate, so the five entries sum to exactly 1.
         """
         defense_tendency = profile_def.to_dict()
         turnover = self._defense_adjusted_turnover_rate(
@@ -326,7 +330,7 @@ class SimulationEngine:
         live = (1.0 - turnover) * (1.0 - foul)
         return {
             "turnover": turnover,
-            "foul": foul,
+            "foul": (1.0 - turnover) * foul,
             "make2": live
             * (dist["rim"] * make["rim"] + dist["mid_range"] * make["mid_range"]),
             "make3": live * (dist["three"] * make["three"]),

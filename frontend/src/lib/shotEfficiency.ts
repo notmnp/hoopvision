@@ -1,40 +1,6 @@
-// Shared shot-efficiency color helpers — the cool→hot FG% ramp used by the
-// Tendency Explorer shot chart and the live court's zone-heat overlay.
-
-export function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value))
-}
-
-export function mix(a: number[], b: number[], t: number): number[] {
-  return a.map((value, index) => Math.round(value + (b[index] - value) * t))
-}
-
-// Map FG% to a muted-ink → vermillion gradient across a realistic 20%–60% band:
-// cold shooting reads as muted ink, a hot clip reads as editorial vermillion.
-export function efficiencyColor(fgPct: number): string {
-  const t = clamp((fgPct - 0.2) / (0.6 - 0.2), 0, 1)
-  const cold = [120, 113, 108]
-  const vermillion = [225, 74, 47]
-  const rgb = mix(cold, vermillion, t)
-  return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`
-}
-
-// Tint a single player's zone by their FG% in their own accent color: cold = a
-// muted wash of the accent, hot = the full accent. Keeps each player's heat in
-// their identity color rather than a shared ramp.
-export function accentHeat(fgPct: number, accentRgb: number[]): string {
-  const t = clamp((fgPct - 0.2) / (0.6 - 0.2), 0, 1)
-  const cold = [168, 162, 158]
-  const rgb = mix(cold, accentRgb, t)
-  return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`
-}
-
-export function hexToRgb(hex: string): [number, number, number] {
-  const match = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
-  if (!match) return [225, 74, 47]
-  const int = parseInt(match[1], 16)
-  return [(int >> 16) & 255, (int >> 8) & 255, int & 255]
-}
+// Shared shot-efficiency helpers — the per-band traffic-light zone grading used
+// by the Tendency Explorer shot map (Simulator) and the live court's zone-heat
+// overlay (BroadcastStrip).
 
 export function formatPct(value: number): string {
   return `${(value * 100).toFixed(1)}%`

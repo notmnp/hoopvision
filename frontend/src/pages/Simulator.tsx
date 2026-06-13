@@ -76,6 +76,9 @@ import {
   formatShotType,
   resolveSides,
 } from "@/lib/liveGame"
+// Shared traffic-light zone grading (basil/ochre/brick newspaper stat tones) —
+// the same palette the live broadcast's heat overlay uses.
+import { gradeZone } from "@/lib/shotEfficiency"
 import TendencyComparisonPanel from "@/pages/TendencyComparisonPanel"
 import ShotChartSheet, { ShotChartTarget } from "@/pages/ShotChartSheet"
 import BroadcastStrip from "@/pages/BroadcastStrip"
@@ -347,7 +350,9 @@ function PlayerSelectionController() {
       )
       setSimulationResult(response.data)
       // Collapse the setup detail so the broadcast is the hero, and bump runId
-      // to remount the inline broadcast from the tip + trigger the scroll-to.
+      // to remount the inline broadcast + trigger the scroll-to. The broadcast
+      // always opens settled (score + Game Story up front); the animated
+      // replay is opt-in via its "Watch how the game unfolded" button.
       setSetupExpanded(false)
       setRunId((id) => id + 1)
     } catch (error) {
@@ -489,8 +494,9 @@ function PlayerSelectionController() {
       </div>
 
       {/* Results mode: a one-line "edit matchup" affordance to re-expand the
-          collapsed setup detail (vitals + stat bars + the comparison panel), so
-          you don't scroll past full input panels to read the verdict. */}
+          collapsed setup detail (vitals + stat bars + the By-the-Numbers
+          comparison), so you don't scroll past full input panels to read the
+          verdict. */}
       {hasResults && (
         <div className="mt-3 flex justify-center">
           <Button
@@ -511,6 +517,38 @@ function PlayerSelectionController() {
           </Button>
         </div>
       )}
+
+      {/* The By-the-Numbers comparison is part of the matchup SETUP, so it lives
+          here under the player cards and collapses with them: shown pre-game,
+          and after a run only while "Edit matchup" is expanded — keeping the
+          results view (broadcast below) clean. The season_id guard avoids
+          rendering against a previous season's stats while a newly selected
+          season is still loading. */}
+      {(!hasResults || setupExpanded) &&
+        playerA &&
+        playerB &&
+        seasonA &&
+        seasonB &&
+        seasonStatsA?.season_id === seasonA &&
+        seasonStatsB?.season_id === seasonB && (
+          <div className="mt-6">
+            <TendencyComparisonPanel
+              playerA={playerA}
+              playerB={playerB}
+              seasonA={seasonA}
+              seasonB={seasonB}
+              statsA={seasonStatsA}
+              statsB={seasonStatsB}
+              onViewShotChart={(player, seasonId) =>
+                setShotChartTarget({
+                  playerId: player.player_id,
+                  playerName: player.name,
+                  seasonId,
+                })
+              }
+            />
+          </div>
+        )}
 
       <ShotChartSheet
         target={shotChartTarget}
@@ -537,7 +575,10 @@ function PlayerSelectionController() {
 
       {/* The live broadcast plays inline, right here on the page — clicking
           "Run game" reveals it and scrolls down to the court. It carries the
-          full game: live floor → final shot-chart comparison → play-by-play. */}
+          whole single game: the live floor, the play-by-play wire and win
+          probability, and — at the final whistle — the Game Story (settled box
+          score + shot-chart comparison) and the Run-it-back control, so no
+          separate summary card is needed below. */}
       {simulationResult && playerA && playerB && (
         <div ref={broadcastRef} className="scroll-mt-20">
           <BroadcastStrip
@@ -545,58 +586,19 @@ function PlayerSelectionController() {
             result={simulationResult}
             playerA={{ player_id: playerA.player_id, name: playerA.name }}
             playerB={{ player_id: playerB.player_id, name: playerB.name }}
-            accentA={getTeamColor(seasonStatsA?.team_abbreviation)}
-            accentB={getTeamColor(seasonStatsB?.team_abbreviation)}
             billing={billing}
-          />
-        </div>
-      )}
-
-      {/* The Game Story: the final scoreline + per-player box and the
-          zone-percentage shot map. Sits below the replayable broadcast as the
-          settled verdict for the single game. */}
-      {simulationResult && playerA && playerB && (
-        <div className="mt-6">
-          <MatchSummaryView
-            summary={simulationResult.summary}
-            playerAName={playerA.name}
-            playerBName={playerB.name}
             onRerun={runSimulation}
             rerunDisabled={busy}
+            warningsSlot={
+              simulationResult.summary.data_warnings.length > 0 ? (
+                <DataWarningInfo
+                  warnings={simulationResult.summary.data_warnings}
+                />
+              ) : null
+            }
           />
         </div>
       )}
-
-      {/* Head-to-head comparison: appears once both players and seasons are
-          confirmed and their season stats have loaded, and STAYS pinned at the
-          bottom of the page even after a simulation runs (pre-game it sits
-          directly under the player cards). The season_id guard avoids rendering
-          against a previous season's stats while a newly selected season is
-          still loading. */}
-      {playerA &&
-        playerB &&
-        seasonA &&
-        seasonB &&
-        seasonStatsA?.season_id === seasonA &&
-        seasonStatsB?.season_id === seasonB && (
-          <div className={cn(hasResults && "mt-6")}>
-            <TendencyComparisonPanel
-              playerA={playerA}
-              playerB={playerB}
-              seasonA={seasonA}
-              seasonB={seasonB}
-              statsA={seasonStatsA}
-              statsB={seasonStatsB}
-              onViewShotChart={(player, seasonId) =>
-                setShotChartTarget({
-                  playerId: player.player_id,
-                  playerName: player.name,
-                  seasonId,
-                })
-              }
-            />
-          </div>
-        )}
 
       <RunActionBar
         canRun={canRunSimulation}
@@ -1712,32 +1714,6 @@ function PlayerStatsSummary({
 }
 
 type ShotCounts = { rim: number; mid_range: number; three: number }
-
-// Per-zone shooting-efficiency grading. Thresholds are zone-specific because a
-// good three (~37%) and a good rim finish (~60%) sit at very different rates.
-const ZONE_THRESHOLDS: Record<keyof ShotCounts, { ok: number; good: number }> = {
-  rim: { ok: 0.45, good: 0.6 },
-  mid_range: { ok: 0.33, good: 0.42 },
-  three: { ok: 0.3, good: 0.37 },
-}
-
-// Traffic-light efficiency grade — muted, print-friendly tones so it reads as
-// a newspaper stat graphic, not neon: hot zones go basil green, ok zones a
-// warm ochre, cold zones brick red, and empty zones a faint muted ink.
-const ZONE_COLORS = {
-  good: { fill: "rgba(74,140,82,0.32)", stroke: "rgba(74,140,82,0.66)" },
-  ok: { fill: "rgba(196,150,46,0.32)", stroke: "rgba(196,150,46,0.70)" },
-  poor: { fill: "rgba(198,72,50,0.30)", stroke: "rgba(198,72,50,0.64)" },
-  none: { fill: "rgba(120,113,108,0.10)", stroke: "rgba(120,113,108,0.30)" },
-}
-
-function gradeZone(zone: keyof ShotCounts, pct: number, attempts: number) {
-  if (attempts === 0) return ZONE_COLORS.none
-  const { ok, good } = ZONE_THRESHOLDS[zone]
-  if (pct >= good) return ZONE_COLORS.good
-  if (pct >= ok) return ZONE_COLORS.ok
-  return ZONE_COLORS.poor
-}
 
 // Stylized half-court: zones radiate up from the basket (rim → mid-range →
 // three), each colored by how efficiently the player shot from it.

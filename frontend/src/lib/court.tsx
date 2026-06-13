@@ -9,9 +9,9 @@ export const COURT_H = 400
 export const COURT_VIEWBOX = `0 0 ${COURT_W} ${COURT_H}`
 
 // The rim, in court coordinates — where every shot arc terminates (left side).
-// Pulled back toward the baseline so the hoop reads as the target a shot drops
-// INTO, rather than sitting out in front of the floor.
-export const HOOP = { x: 56, y: 200 }
+// Tucked right up against the left baseline (backboard just off it, rim in
+// front), so the basket never reads as sitting out in the paint.
+export const HOOP = { x: 26, y: 200 }
 
 // Rim radius — shared so the make "net flash" overlay lines up with the drawn rim.
 export const RIM_R = 8
@@ -28,7 +28,7 @@ export const PLAYER_HOME: Record<"a" | "b", { x: number; y: number }> = {
 // `${SHOT_ZONE_BASIC}|${SHOT_ZONE_AREA}` (the labels the backend emits). x grows
 // from the rim (left) out to the arc (right); y spans sideline to sideline.
 export const ZONE_POSITIONS: Record<string, { x: number; y: number }> = {
-  "Restricted Area|Center(C)": { x: 98, y: 200 },
+  "Restricted Area|Center(C)": { x: 78, y: 200 },
   "In The Paint (Non-RA)|Center(C)": { x: 182, y: 200 },
   "In The Paint (Non-RA)|Left Side(L)": { x: 168, y: 164 },
   "In The Paint (Non-RA)|Right Side(R)": { x: 168, y: 236 },
@@ -37,49 +37,22 @@ export const ZONE_POSITIONS: Record<string, { x: number; y: number }> = {
   "Mid-Range|Left Side Center(LC)": { x: 264, y: 136 },
   "Mid-Range|Right Side Center(RC)": { x: 264, y: 264 },
   "Mid-Range|Right Side(R)": { x: 180, y: 312 },
-  "Left Corner 3|Left Side(L)": { x: 94, y: 34 },
-  "Right Corner 3|Right Side(R)": { x: 94, y: 366 },
-  "Above the Break 3|Left Side Center(LC)": { x: 384, y: 88 },
-  "Above the Break 3|Center(C)": { x: 432, y: 200 },
-  "Above the Break 3|Right Side Center(RC)": { x: 384, y: 312 },
+  "Left Corner 3|Left Side(L)": { x: 96, y: 40 },
+  "Right Corner 3|Right Side(R)": { x: 96, y: 360 },
+  // Just OUTSIDE the arc (semicircle: centre (150,200), r=170, apex (320,200)),
+  // not floated far past it — these sit a hair beyond the line where the shot
+  // was actually taken.
+  "Above the Break 3|Left Side Center(LC)": { x: 302, y: 104 },
+  "Above the Break 3|Center(C)": { x: 340, y: 200 },
+  "Above the Break 3|Right Side Center(RC)": { x: 302, y: 296 },
 }
-
-// The net hanging beneath the rim, built once at module load. Eleven cords drape
-// from the rim's mouth (its full width, at HOOP.y) down to a smaller bottom ring,
-// crossed by three weave rows — the classic tapering-net silhouette that reads as
-// a real net even at this small scale, rather than a bare ring. Drawn in HOOP-
-// centered court coordinates so it sits exactly under the rim every shot drops into.
-const NET = (() => {
-  const R = RIM_R
-  const drop = R * 1.9 // how far the net hangs below the rim
-  const botR = R * 0.5 // radius of the cinched bottom opening
-  const cords = 11
-  let mesh = ""
-  for (let i = 0; i < cords; i++) {
-    const t = i / (cords - 1)
-    const topX = HOOP.x - R + 2 * R * t
-    const botX = HOOP.x - botR + 2 * botR * t
-    mesh += `M ${topX.toFixed(1)} ${HOOP.y} Q ${((topX + botX) / 2).toFixed(1)} ${(
-      HOOP.y +
-      drop * 0.6
-    ).toFixed(1)} ${botX.toFixed(1)} ${(HOOP.y + drop).toFixed(1)} `
-  }
-  for (let r = 1; r <= 3; r++) {
-    const y = HOOP.y + drop * (r / 4)
-    const rr = R - (R - botR) * (r / 4)
-    mesh += `M ${(HOOP.x - rr).toFixed(1)} ${y.toFixed(1)} Q ${HOOP.x} ${(y + 5).toFixed(
-      1
-    )} ${(HOOP.x + rr).toFixed(1)} ${y.toFixed(1)} `
-  }
-  return mesh.trim()
-})()
 
 export type ShotBand = "rim" | "mid_range" | "three"
 
 const BAND_ANCHORS: Record<ShotBand, { x: number; y: number }> = {
-  rim: { x: 108, y: 200 },
+  rim: { x: 88, y: 200 },
   mid_range: { x: 264, y: 200 },
-  three: { x: 420, y: 200 },
+  three: { x: 340, y: 200 },
 }
 
 // Classify a SHOT_ZONE_BASIC label into a band — mirrors the backend's
@@ -101,14 +74,6 @@ function jitter(seed: number): [number, number] {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
-}
-
-export function lerp(
-  a: { x: number; y: number },
-  b: { x: number; y: number },
-  t: number
-): { x: number; y: number } {
-  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }
 }
 
 // A point on a quadratic Bézier (used to ride the shot arc without SMIL).
@@ -154,41 +119,52 @@ export function arcControl(
   return { x: x + (HOOP.x - x) * 0.42, y: Math.min(y, HOOP.y) - lift }
 }
 
-// The shot arc as an SVG quadratic path from a launch point to the rim.
-export function arcPath(x: number, y: number): string {
-  const c = arcControl(x, y)
-  return `M ${x} ${y} Q ${c.x} ${c.y} ${HOOP.x} ${HOOP.y}`
-}
-
 // Stylized landscape half-court: outer bound, the paint/key (extending right
 // from the left baseline), free-throw circle, the 3-point line (corners + arc
-// bulging right), the rim, and the backboard.
+// bulging right), the rim, and the backboard. Every stroke uses
+// non-scaling-stroke so the line weight is a fixed pixel value at any rendered
+// size (the SVG usually scales UP, which would otherwise fatten the lines).
+// 1.4px reads a touch heavier than a pure hairline so the diagram holds its own
+// against the shot marks. vectorEffect doesn't inherit, so it's set per shape.
+const COURT_STROKE = 1.4
 export function CourtLines(): ReactElement {
   return (
     <g
       fill="none"
       stroke="currentColor"
-      strokeWidth={2}
+      strokeWidth={COURT_STROKE}
       strokeLinejoin="round"
       strokeLinecap="round"
-      className="text-foreground/25"
+      className="text-foreground/20"
     >
-      {/* outer boundary */}
-      <rect x={2} y={2} width={560} height={396} rx={4} />
+      {/* No outer boundary rect here — the court's frame is the single hairline
+          border on the container that wraps this SVG, so drawing one here too
+          would double it up. */}
 
-      {/* the key / paint, from the left baseline (right edge = FT line at x=192) */}
-      <rect x={2} y={138} width={190} height={124} />
+      {/* the key / paint — its left edge IS the baseline, so it starts at x=0
+          flush with the container's border (right edge = FT line at x=192), with
+          a whisper of ink tint so it reads as a printed floor area */}
+      <rect
+        x={0}
+        y={138}
+        width={192}
+        height={124}
+        fill="currentColor"
+        fillOpacity={0.16}
+        vectorEffect="non-scaling-stroke"
+      />
 
       {/* Free-throw circle on the FT line (x=192), realistically proportioned
           (r=46 ≈ 12ft circle vs the 16ft lane). The outer (toward half-court)
           half is solid; the half inside the paint is dashed — the real-court
           convention — and kept visible enough that the eye reads a full circle.
           Center (192,200) → top/bottom at (192,154)/(192,246). */}
-      <path d="M 192 154 A 46 46 0 0 1 192 246" />
+      <path d="M 192 154 A 46 46 0 0 1 192 246" vectorEffect="non-scaling-stroke" />
       <path
         d="M 192 154 A 46 46 0 0 0 192 246"
         strokeDasharray="6 5"
-        className="text-foreground/20"
+        className="text-foreground/15"
+        vectorEffect="non-scaling-stroke"
       />
 
       {/* 3-point line: straight corner segments from the left baseline out to the
@@ -197,26 +173,27 @@ export function CourtLines(): ReactElement {
           its tangent there is horizontal — so the corner segments and the arc meet
           SMOOTHLY (no kink), and a minor arc never swings off the floor the way the
           previous oversized major arc did. Apex (320,200), clear of the FT circle. */}
-      <path d="M 2 30 L 150 30 A 170 170 0 0 1 150 370 L 2 370" />
+      <path d="M 0 30 L 150 30 A 170 170 0 0 1 150 370 L 0 370" vectorEffect="non-scaling-stroke" />
 
-      {/* Basket (left): backboard, a short rim neck, the rim, and a hanging net,
-          drawn as one attached unit. Backboard at x=42; neck runs to the rim's
-          left edge. The net (NET, built above) drapes from the rim mouth so the
-          hoop reads as a real basket rather than a bare ring. The rim is a
-          slightly flattened ellipse — a hint of the broadcast tilt's dimension. */}
+      {/* Basket (left), in true plan view — this is a bird's-eye diagram, so
+          the basket is just the backboard line (just off the baseline), a short
+          rim neck, and the rim circle. No draping net: that's a side-on detail
+          that would break the top-down perspective. Same 1px hairline weight as
+          every other line — only a touch darker so the target still anchors the
+          diagram (emphasis via tone, never thickness, per the design norm). */}
       <path
-        d={`M 42 178 L 42 222 M 42 200 L ${HOOP.x - RIM_R} 200`}
-        className="text-foreground/50"
-        strokeWidth={2.5}
+        d={`M 14 178 L 14 222 M 14 200 L ${HOOP.x - RIM_R} 200`}
+        className="text-foreground/45"
+        strokeWidth={COURT_STROKE + 0.4}
+        vectorEffect="non-scaling-stroke"
       />
-      <path d={NET} className="text-foreground/30" strokeWidth={0.8} />
-      <ellipse
+      <circle
         cx={HOOP.x}
         cy={HOOP.y}
-        rx={RIM_R}
-        ry={RIM_R * 0.78}
-        className="text-foreground/55"
-        strokeWidth={2.4}
+        r={RIM_R}
+        className="text-foreground/50"
+        strokeWidth={COURT_STROKE + 0.4}
+        vectorEffect="non-scaling-stroke"
       />
     </g>
   )

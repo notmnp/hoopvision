@@ -7,6 +7,7 @@
 import { PlayByPlay } from "@/lib/simulation"
 import {
   HOOP,
+  RIM_R,
   ZONE_POSITIONS,
   arcControl,
   bandFromBasic,
@@ -97,14 +98,6 @@ export function formatShotType(shotType: string): string {
     return "three-point"
   }
   return shotType
-}
-
-// One-line description of a possession for the live ticker.
-export function describePlay(play: PlayByPlay): string {
-  if (play.turnover) return "Turnover"
-  if (play.foul) return "Drew a foul"
-  const made = play.result === "made"
-  return `${formatShotType(play.shot_type)} · ${made ? "Made" : "Missed"}`
 }
 
 function zoneSide(area: string | null | undefined): string {
@@ -200,7 +193,9 @@ export interface PossessionTiming {
   duration: number
 }
 
-function frac(value: number): number {
+// Fractional part of a number — shared with the broadcast's deterministic
+// jitter/scatter so there's one definition.
+export function frac(value: number): number {
   return value - Math.floor(value)
 }
 
@@ -225,7 +220,22 @@ function shotArc(play: PlayByPlay) {
   const launch = shotPoint(play.shot_zone_basic, play.shot_zone_area, play.possession)
   const control = arcControl(launch.x, launch.y)
   const made = play.result === "made"
-  const end = made ? HOOP : { x: HOOP.x + 16, y: HOOP.y - 8 }
+  // A make terminates at the hoop's center (the ball drops in). A miss flies
+  // all the way to the rim and CONTACTS it — at a per-possession point on the
+  // iron (front rim, side rim, a graze off the edge…) picked deterministically
+  // around the side facing the shot, so consecutive misses don't all clank off
+  // the same spot. The carom is drawn radially off that contact (see ShotFx),
+  // so a miss never looks like the ball simply died in mid-air.
+  let end = HOOP
+  if (!made) {
+    const approach = Math.atan2(launch.y - HOOP.y, launch.x - HOOP.x)
+    const angle =
+      approach + (frac(Math.sin((play.possession + 1) * 17.9)) - 0.5) * 1.6
+    end = {
+      x: HOOP.x + Math.cos(angle) * (RIM_R + 1),
+      y: HOOP.y + Math.sin(angle) * (RIM_R + 1),
+    }
+  }
   // Sample the Bézier so the flight tracks the real arc length, not the chord.
   let length = 0
   let prev = launch
@@ -279,9 +289,10 @@ export function formatClock(totalSeconds: number): string {
 
 // ---------------------------------------------------------------------------
 // The shot projectile — the ball appears ONLY while a shot is in flight (a thin
-// trace that draws then fades, colored orange for a make and red for a miss).
-// Derived from the clock so it survives pause / scrub / speed. Between shots the
-// floor is quiet; only the player markers show possession.
+// trace that draws then fades, in the shooter's accent colour: solid for a make,
+// dashed for a miss). Derived from the clock so it survives pause / scrub /
+// speed. Between shots the floor is quiet; only the player markers show
+// possession.
 // ---------------------------------------------------------------------------
 
 type Point = { x: number; y: number }
@@ -290,28 +301,32 @@ export interface ActiveShot {
   possession: number
   launch: Point
   control: Point
-  end: Point // arc terminus (rim for a make; short of the rim for a miss)
+  end: Point // arc terminus (hoop center for a make; the rim's near edge for a miss)
   made: boolean
   three: boolean
   arcT: number // 0..1 across launch → rim (drives the trace + ball head)
-  fadeT: number // 0..1 after the ball arrives (trace fade + make net flash)
+  fadeT: number // 0..1 after the ball arrives (trace fade + make rim flash)
 }
 
-const clamp01 = (t: number) => Math.max(0, Math.min(1, t))
+// Clamp to [0,1] — shared with the broadcast's clock-driven FX math.
+export const clamp01 = (t: number) => Math.max(0, Math.min(1, t))
+
+// The possession whose timeline slot contains `clock`, or -1. Shared by the
+// shot and event flourishes so they locate the active possession identically.
+function possessionIndexAt(clock: number, timings: PossessionTiming[]): number {
+  for (let k = 0; k < timings.length; k++) {
+    const t = timings[k]
+    if (clock >= t.start && clock < t.start + t.duration) return k
+  }
+  return -1
+}
 
 export function activeShotAt(
   clock: number,
   plays: PlayByPlay[],
   timings: PossessionTiming[]
 ): ActiveShot | null {
-  let index = -1
-  for (let k = 0; k < timings.length; k++) {
-    const t = timings[k]
-    if (clock >= t.start && clock < t.start + t.duration) {
-      index = k
-      break
-    }
-  }
+  const index = possessionIndexAt(clock, timings)
   if (index < 0) return null
   const play = plays[index]
   if (!isShotPlay(play)) return null
@@ -342,6 +357,42 @@ export function activeShotAt(
 // as a persistent, hoverable glyph inside the ball-handler's circle (see
 // BroadcastStrip's eventEls). This kind tag picks the glyph.
 export type LiveEventKind = "foul" | "turnover"
+
+// The transient flourish that fires WHEN a non-shot possession happens during
+// live playback — a swelling, wobbling whistle with sound-rings for a drawn
+// foul; a swelling steal-hand with the ball bouncing loose for a turnover. Like
+// ActiveShot it's a pure function of the clock, so pause / scrub / speed replay
+// it faithfully. `t` is 0..1 over the flourish.
+export interface ActiveEvent {
+  possession: number
+  kind: LiveEventKind
+  t: number
+}
+
+// A quiet beat, then the flourish. Kept within the briefest non-shot slot (the
+// minimum is ~4 game-seconds; see possessionDuration) but long enough that the
+// whistle's sound-rings read as an unhurried pulse rather than a fast blip.
+const EVENT_BEAT = 0.6
+const EVENT_PLAY = 3.2
+
+export function activeEventAt(
+  clock: number,
+  plays: PlayByPlay[],
+  timings: PossessionTiming[]
+): ActiveEvent | null {
+  const index = possessionIndexAt(clock, timings)
+  if (index < 0) return null
+  const play = plays[index]
+  if (isShotPlay(play) || !(play.turnover || play.foul)) return null
+  const t0 = timings[index].start + EVENT_BEAT
+  const t1 = t0 + EVENT_PLAY
+  if (clock < t0 || clock >= t1) return null
+  return {
+    possession: play.possession,
+    kind: play.turnover ? "turnover" : "foul",
+    t: clamp01((clock - t0) / (t1 - t0)),
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Running box score

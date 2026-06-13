@@ -188,6 +188,19 @@ class SimulationEngineTest(unittest.TestCase):
         self.assertEqual(player_stats.points, 0)
         self.assertEqual(player_stats.fouls_drawn, 1)
 
+    def test_possession_outcome_dist_sums_to_one(self):
+        # Regression: the foul term must be the actual per-possession
+        # probability (1 - turnover) * foul_rate, not the raw rate, so the
+        # five outcome probabilities form a true distribution.
+        profile_a = make_profile(1)
+        profile_b = make_profile(2)
+
+        dist = self.engine._possession_outcome_dist(
+            profile_a, profile_b, self.players[1], self.players[2]
+        )
+
+        self.assertAlmostEqual(sum(dist.values()), 1.0, delta=1e-9)
+
     def test_seeded_simulation_is_deterministic(self):
         first = self.engine.simulate(1, 2, SEASON_A, SEASON_B, seed=7)
         second = self.engine.simulate(1, 2, SEASON_A, SEASON_B, seed=7)
