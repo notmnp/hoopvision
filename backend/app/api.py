@@ -1,5 +1,6 @@
 import csv
 import json
+import logging
 import os
 import re
 import unicodedata
@@ -47,9 +48,21 @@ except ImportError:  # pragma: no cover - exercised only without the dependency
 
 app = FastAPI()
 
+logger = logging.getLogger(__name__)
+
 WINGSPAN_CSV_PATH = (
     Path(__file__).resolve().parents[1] / "data" / "nba_wingspan_performance_2025.csv"
 )
+
+# Tier 2 of the wingspan fallback chain (ADR-006) is a seasonal CSV that is not
+# currently bundled; warn once at import so the silently skipped tier is
+# visible in logs rather than discovered via degraded wingspan coverage.
+if not WINGSPAN_CSV_PATH.exists():
+    logger.warning(
+        "Wingspan CSV not found at %s; resolution falls back to the curated "
+        "dict and position averages for non-combine players.",
+        WINGSPAN_CSV_PATH,
+    )
 
 CURATED_WINGSPAN_INCHES = {
     "allen iverson": 75.25,

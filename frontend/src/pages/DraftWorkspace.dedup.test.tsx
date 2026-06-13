@@ -20,7 +20,7 @@ const spinner = vi.hoisted(() => ({
 
 vi.mock("@/components/SpinnerPanel", () => ({
   // forwardRef because the workspace hands SpinnerPanel a ref (its spin handle).
-  SpinnerPanel: forwardRef(function MockSpinner(props: NonNullable<typeof spinner.props>, _ref) {
+  SpinnerPanel: forwardRef(function MockSpinner(props: NonNullable<typeof spinner.props>) {
     spinner.props = props
     return <div data-testid="exclude-ids">{props.excludeIds.join(",")}</div>
   }),

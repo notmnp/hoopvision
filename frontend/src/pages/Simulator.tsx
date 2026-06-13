@@ -418,25 +418,7 @@ function PlayerSelectionController() {
       setBulkResult(response.data)
       setSetupExpanded(false)
     } catch (error) {
-      // Fall back to looping the single-simulation endpoint client-side when
-      // the bulk endpoint is unavailable (e.g. an older backend without WO-20).
-      if (axios.isAxiosError(error) && error.response?.status === 404) {
-        try {
-          setBulkResult(
-            await runBulkClientSide(
-              playerA.player_id,
-              playerB.player_id,
-              seasonA,
-              seasonB,
-              possessionMode
-            )
-          )
-        } catch (fallbackError) {
-          setSimulationError(getSimulationError(fallbackError))
-        }
-      } else {
-        setSimulationError(getSimulationError(error))
-      }
+      setSimulationError(getSimulationError(error))
     } finally {
       setBulkLoading(false)
     }
@@ -2385,50 +2367,6 @@ function formatShotType(shotType: string) {
 const SimulatorView = PlayerSelectionController
 
 export default SimulatorView
-
-async function runBulkClientSide(
-  playerAId: number,
-  playerBId: number,
-  seasonAId: string,
-  seasonBId: string,
-  possessionMode: PossessionMode
-): Promise<BulkSimulationResult> {
-  let playerAWins = 0
-  let playerBWins = 0
-  let ties = 0
-
-  // No seed is sent, so each game is independently random server-side and the
-  // batch differs run to run (mirrors the bulk endpoint's fresh-RNG behavior).
-  for (let game = 0; game < BULK_SIM_COUNT; game++) {
-    const response = await axios.post<SimulationResult>(
-      `${API_BASE_URL}/simulate`,
-      {
-        player_a_id: playerAId,
-        player_b_id: playerBId,
-        season_a_id: seasonAId,
-        season_b_id: seasonBId,
-        possession_mode: possessionMode,
-      }
-    )
-    const { a, b } = response.data.summary.final_score
-    if (a > b) {
-      playerAWins++
-    } else if (b > a) {
-      playerBWins++
-    } else {
-      ties++
-    }
-  }
-
-  return {
-    player_a_wins: playerAWins,
-    player_b_wins: playerBWins,
-    ties,
-    total_simulations: BULK_SIM_COUNT,
-    player_a_win_pct: Math.round((10000 * playerAWins) / BULK_SIM_COUNT) / 100,
-    player_b_win_pct: Math.round((10000 * playerBWins) / BULK_SIM_COUNT) / 100,
-  }
-}
 
 function getSimulationError(error: unknown) {
   if (axios.isAxiosError(error)) {

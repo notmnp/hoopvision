@@ -26,6 +26,9 @@ SEASON_STATS = {
     "rebound_per_game": 6.0,
     "block_per_game": 0.5,
     "steal_per_game": 1.0,
+    "personal_foul_per_game": 2.0,
+    "true_shooting_pct": 0.58,
+    "free_throw_pct": 0.75,
 }
 
 
