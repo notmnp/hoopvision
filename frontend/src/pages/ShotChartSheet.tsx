@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { ShotZone, useShotChart } from "@/hooks/useShotChart"
+import { COURT_VIEWBOX, CourtLines, ZONE_POSITIONS } from "@/lib/court"
 
 export interface ShotChartTarget {
   playerId: number
@@ -98,26 +99,6 @@ function DataWarning({ warnings }: { warnings: string[] }) {
   )
 }
 
-// Approximate court position (in the 0..500 x, 0..470 y viewBox) for each NBA
-// shot zone, keyed by `${SHOT_ZONE_BASIC}|${SHOT_ZONE_AREA}`. The hoop sits near
-// the bottom baseline; zones radiate outward toward the 3-point line.
-const ZONE_POSITIONS: Record<string, { x: number; y: number }> = {
-  "Restricted Area|Center(C)": { x: 250, y: 388 },
-  "In The Paint (Non-RA)|Center(C)": { x: 250, y: 318 },
-  "In The Paint (Non-RA)|Left Side(L)": { x: 205, y: 330 },
-  "In The Paint (Non-RA)|Right Side(R)": { x: 295, y: 330 },
-  "Mid-Range|Center(C)": { x: 250, y: 250 },
-  "Mid-Range|Left Side(L)": { x: 110, y: 320 },
-  "Mid-Range|Left Side Center(LC)": { x: 170, y: 250 },
-  "Mid-Range|Right Side Center(RC)": { x: 330, y: 250 },
-  "Mid-Range|Right Side(R)": { x: 390, y: 320 },
-  "Left Corner 3|Left Side(L)": { x: 42, y: 392 },
-  "Right Corner 3|Right Side(R)": { x: 458, y: 392 },
-  "Above the Break 3|Left Side Center(LC)": { x: 110, y: 150 },
-  "Above the Break 3|Center(C)": { x: 250, y: 110 },
-  "Above the Break 3|Right Side Center(RC)": { x: 390, y: 150 },
-}
-
 function zoneKey(zone: ShotZone): string {
   return `${zone.zone_label}|${zone.zone_area}`
 }
@@ -142,7 +123,7 @@ function ShotChartCourt({ zones }: { zones: ShotZone[] }) {
       </div>
 
       <div className="overflow-hidden rounded-sm border bg-muted/20">
-        <svg viewBox="0 0 500 470" className="h-auto w-full">
+        <svg viewBox={COURT_VIEWBOX} className="h-auto w-full">
           <CourtLines />
           {positioned.map((zone) => {
             const key = zoneKey(zone)
@@ -225,32 +206,6 @@ function ZoneDetail({ zone }: { zone: ShotZone | null }) {
         </div>
       </div>
     </div>
-  )
-}
-
-// Stylized half-court: outer bound, the paint/key, free-throw circle, the
-// 3-point line (corners + arc), and the hoop.
-function CourtLines() {
-  return (
-    <g
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      className="text-foreground/25"
-    >
-      <rect x={2} y={2} width={496} height={466} rx={4} />
-      <rect x={170} y={280} width={160} height={188} />
-      <circle cx={250} cy={280} r={60} />
-      <path d="M 30 468 L 30 330 A 237.5 237.5 0 0 1 470 330 L 470 468" />
-      <circle
-        cx={250}
-        cy={418}
-        r={9}
-        className="text-foreground/50"
-        strokeWidth={2.5}
-      />
-      <line x1={220} y1={430} x2={280} y2={430} className="text-foreground/50" />
-    </g>
   )
 }
 

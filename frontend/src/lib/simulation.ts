@@ -13,6 +13,11 @@ export interface PlayByPlay {
   turnover: boolean
   score_a: number
   score_b: number
+  // Real shot location, sampled from the player's shot chart on the backend.
+  // Only present on a field-goal attempt ("made"/"missed"); null on turnovers
+  // and drawn fouls. Labels match the shared court's ZONE_POSITIONS keys.
+  shot_zone_basic?: string | null
+  shot_zone_area?: string | null
 }
 
 export interface PlayerSimStats {
@@ -46,5 +51,9 @@ export interface MatchSummary {
 
 export interface SimulationResult {
   play_by_play: PlayByPlay[]
+  // Player A's model-derived win probability after each possession (0–1), one
+  // per play. Computed by the backend from the players' tendency profiles; it
+  // only reaches 1/0 once a player has actually reached 21.
+  win_probability?: number[]
   summary: MatchSummary
 }

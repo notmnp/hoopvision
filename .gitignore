@@ -2,6 +2,8 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .DS_Store
+.venv/
+venv/
 
 # Local environment files (committed example: frontend/.env.example)
 frontend/.env

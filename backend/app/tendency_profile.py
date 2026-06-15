@@ -1,5 +1,5 @@
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -73,6 +73,40 @@ LEAGUE_AVERAGE_FEATURES = {
     "steal_per_game": 0.8,
 }
 
+# Per-band league-average split over concrete court zones, used to place shots
+# when a player has no real tracking-era shot chart (pre-2013 seasons) or no
+# observed attempts in a band. The (basic, area) labels mirror the NBA
+# SHOT_ZONE_BASIC / SHOT_ZONE_AREA values the frontend court maps to coordinates;
+# weights are relative attempt shares within each band.
+LEAGUE_AVERAGE_ZONE_WEIGHTS: dict[str, list[dict[str, Any]]] = {
+    "rim": [
+        {"basic": "Restricted Area", "area": "Center(C)", "weight": 62.0},
+        {"basic": "In The Paint (Non-RA)", "area": "Center(C)", "weight": 16.0},
+        {"basic": "In The Paint (Non-RA)", "area": "Left Side(L)", "weight": 11.0},
+        {"basic": "In The Paint (Non-RA)", "area": "Right Side(R)", "weight": 11.0},
+    ],
+    "mid_range": [
+        {"basic": "Mid-Range", "area": "Center(C)", "weight": 14.0},
+        {"basic": "Mid-Range", "area": "Left Side(L)", "weight": 22.0},
+        {"basic": "Mid-Range", "area": "Left Side Center(LC)", "weight": 18.0},
+        {"basic": "Mid-Range", "area": "Right Side Center(RC)", "weight": 18.0},
+        {"basic": "Mid-Range", "area": "Right Side(R)", "weight": 22.0},
+    ],
+    "three": [
+        {"basic": "Above the Break 3", "area": "Center(C)", "weight": 30.0},
+        {"basic": "Above the Break 3", "area": "Left Side Center(LC)", "weight": 24.0},
+        {"basic": "Above the Break 3", "area": "Right Side Center(RC)", "weight": 24.0},
+        {"basic": "Left Corner 3", "area": "Left Side(L)", "weight": 11.0},
+        {"basic": "Right Corner 3", "area": "Right Side(R)", "weight": 11.0},
+    ],
+}
+
+SHOT_LOCATION_FALLBACK_WARNING = (
+    "Shot locations are illustrative league-average placements; the NBA "
+    "published no shot-tracking data for this season, so exact spots are not "
+    "drawn from this player's real shot chart."
+)
+
 
 @dataclass(frozen=True)
 class TendencyProfile:
@@ -90,6 +124,11 @@ class TendencyProfile:
     height_bucket: str = "wing"
     matchup_possession_count: int = 0
     observed_blend_weight: float = 0.0
+    # band ("rim"/"mid_range"/"three") -> [{"basic", "area", "weight"}, ...],
+    # the per-band court-zone distribution the simulation samples a shot location
+    # from. Defaults empty so a profile without it places no location (and the
+    # simulation consumes no RNG for it).
+    shot_zone_weights: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -229,6 +268,15 @@ class TendencyProfileBuilder:
             }
         )
 
+        # Carry the player's real per-zone shot distribution onto the profile so
+        # the simulation can place each shot where the player actually took it.
+        # When no real shot chart exists (pre-tracking or no observed data) the
+        # league-average split stands in and the substitution is disclosed.
+        zone_data = observed_stats.zone_data if observed_stats else []
+        shot_zone_weights, had_real_zone_data = self._build_shot_zone_weights(zone_data)
+        if not had_real_zone_data:
+            data_warnings.append(SHOT_LOCATION_FALLBACK_WARNING)
+
         return TendencyProfile(
             player_id=player_id,
             model_version=getattr(self.model, "model_version", DEFAULT_MODEL_VERSION),
@@ -252,6 +300,7 @@ class TendencyProfileBuilder:
                 observed_stats.possession_count if observed_stats else 0
             ),
             observed_blend_weight=observed_weight,
+            shot_zone_weights=shot_zone_weights,
         )
 
     def _build_model_input(
@@ -385,6 +434,39 @@ class TendencyProfileBuilder:
             "mid_range_efficiency": cls._efficiency(grouped["mid_range"]),
             "three_efficiency": cls._efficiency(grouped["three"]),
         }
+
+    @classmethod
+    def _build_shot_zone_weights(
+        cls, zone_data: list[ZoneShotData]
+    ) -> tuple[dict[str, list[dict[str, Any]]], bool]:
+        # Group the real shot chart into per-band court-zone weights. Returns the
+        # weights plus whether ANY real zone was found; when a band has no real
+        # attempts (or none exist at all) the league-average split fills it so the
+        # simulation can always place a shot.
+        weights: dict[str, list[dict[str, Any]]] = {
+            "rim": [],
+            "mid_range": [],
+            "three": [],
+        }
+        for zone in zone_data:
+            if zone.fga <= 0:
+                continue
+            band = cls._shot_type_from_zone(zone)
+            weights[band].append(
+                {
+                    "basic": zone.shot_zone_basic,
+                    "area": zone.shot_zone_area,
+                    "weight": float(zone.fga),
+                }
+            )
+
+        had_real_zone_data = any(entries for entries in weights.values())
+        for band, entries in weights.items():
+            if not entries:
+                weights[band] = [
+                    dict(entry) for entry in LEAGUE_AVERAGE_ZONE_WEIGHTS[band]
+                ]
+        return weights, had_real_zone_data
 
     @staticmethod
     def _shot_type_from_zone(zone: ZoneShotData) -> str:

@@ -33,6 +33,13 @@ class PlayByPlay:
     turnover: bool
     score_a: int
     score_b: int
+    # Where on the floor the shot was taken, sampled from the player's real
+    # shot chart (see TendencyProfile.shot_zone_weights). Only set on an actual
+    # field-goal attempt ("made"/"missed"); turnovers and drawn fouls leave both
+    # None. The labels match the NBA SHOT_ZONE_BASIC / SHOT_ZONE_AREA values the
+    # frontend court already maps to coordinates.
+    shot_zone_basic: str | None = None
+    shot_zone_area: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -272,6 +279,9 @@ class SimulationEngine:
 
         return {
             "play_by_play": [play.to_dict() for play in play_by_play],
+            "win_probability": self._win_probability_curve(
+                matchup, play_by_play, possession_mode
+            ),
             "summary": {
                 "winner": winner,
                 "final_score": scores,
@@ -285,6 +295,120 @@ class SimulationEngine:
                 "data_warnings": matchup.data_warnings,
             },
         }
+
+    def _possession_outcome_dist(
+        self,
+        profile_off: Any,
+        profile_def: Any,
+        player_off: dict[str, Any],
+        player_def: dict[str, Any],
+    ) -> dict[str, float]:
+        """One offensive possession's outcome distribution, from the model.
+
+        Collapses the same turnover → foul → shot logic the engine plays out
+        each possession (see _simulate_possession) into the probabilities of
+        {turnover, foul (retry), made 2, made 3, miss}, reusing the exact
+        contest helpers so the win-probability agrees with the simulation.
+
+        Because the engine checks turnover first and foul only on no-turnover,
+        the reported foul term is the actual per-possession probability
+        (1 - turnover) * foul_rate, so the five entries sum to exactly 1.
+        """
+        defense_tendency = profile_def.to_dict()
+        turnover = self._defense_adjusted_turnover_rate(
+            profile_off.turnover_rate, defense_tendency, player_off, player_def
+        )
+        foul = min(0.95, max(0.0, profile_off.foul_drawing_rate))
+        dist = profile_off.shot_type_distribution
+        eff = profile_off.scoring_efficiency_by_shot_type
+        make = {
+            band: self._make_probability(
+                eff[band], defense_tendency, player_off, player_def
+            )
+            for band in ("rim", "mid_range", "three")
+        }
+        live = (1.0 - turnover) * (1.0 - foul)
+        return {
+            "turnover": turnover,
+            "foul": (1.0 - turnover) * foul,
+            "make2": live
+            * (dist["rim"] * make["rim"] + dist["mid_range"] * make["mid_range"]),
+            "make3": live * (dist["three"] * make["three"]),
+            "miss": live
+            * (
+                dist["rim"] * (1.0 - make["rim"])
+                + dist["mid_range"] * (1.0 - make["mid_range"])
+                + dist["three"] * (1.0 - make["three"])
+            ),
+        }
+
+    def _win_probability_curve(
+        self,
+        matchup: PreparedMatchup,
+        play_by_play: list[PlayByPlay],
+        possession_mode: str,
+    ) -> list[float]:
+        """Player A's win probability after each possession, from the model.
+
+        An absorbing-barrier Markov chain over (score_a, score_b, who-has-the-
+        ball), whose per-possession scoring distributions come from each
+        player's tendency profile (_possession_outcome_dist). It is pinned to
+        1.0 / 0.0 ONLY when a player has actually reached 21 — every other state
+        is strictly between, so a comeback is always possible (AC: no premature
+        certainty). Computed once per game.
+        """
+        dist_a = self._possession_outcome_dist(
+            matchup.profile_a, matchup.profile_b, matchup.player_a, matchup.player_b
+        )
+        dist_b = self._possession_outcome_dist(
+            matchup.profile_b, matchup.profile_a, matchup.player_b, matchup.player_a
+        )
+        make_keeps = possession_mode != "alternating"
+        memo: dict[tuple[int, int], tuple[float, float]] = {}
+
+        def win_at(sa: int, sb: int, poss: str) -> float:
+            if sa >= 21:
+                return 1.0
+            if sb >= 21:
+                return 0.0
+            pair = memo[(sa, sb)]
+            return pair[0] if poss == "a" else pair[1]
+
+        # Solve from the highest total score downward. Same-score A/B states
+        # reference each other (a miss/turnover flips possession without
+        # scoring), so each (sa, sb) is a 2x2 linear system solved together;
+        # the made-shot terms only ever reference strictly-higher scores.
+        for total in range(40, -1, -1):
+            for sa in range(0, 21):
+                sb = total - sa
+                if sb < 0 or sb > 20:
+                    continue
+                a_make = "a" if make_keeps else "b"
+                b_make = "b" if make_keeps else "a"
+                a_const = (
+                    dist_a["make2"] * win_at(sa + 2, sb, a_make)
+                    + dist_a["make3"] * win_at(sa + 3, sb, a_make)
+                ) / (1.0 - dist_a["foul"])
+                a_coef = (dist_a["turnover"] + dist_a["miss"]) / (1.0 - dist_a["foul"])
+                b_const = (
+                    dist_b["make2"] * win_at(sa, sb + 2, b_make)
+                    + dist_b["make3"] * win_at(sa, sb + 3, b_make)
+                ) / (1.0 - dist_b["foul"])
+                b_coef = (dist_b["turnover"] + dist_b["miss"]) / (1.0 - dist_b["foul"])
+                denom = 1.0 - a_coef * b_coef
+                if abs(denom) < 1e-9:
+                    denom = 1e-9
+                w_a = (a_const + a_coef * b_const) / denom
+                w_b = b_const + b_coef * w_a
+                memo[(sa, sb)] = (min(1.0, max(0.0, w_a)), min(1.0, max(0.0, w_b)))
+
+        name_a = matchup.player_a["name"]
+        curve: list[float] = []
+        for index, play in enumerate(play_by_play):
+            nxt = play_by_play[index + 1] if index + 1 < len(play_by_play) else None
+            next_poss = "a" if (nxt is not None and nxt.offensive_player == name_a) else "b"
+            curve.append(round(win_at(play.score_a, play.score_b, next_poss), 4))
+        return curve
 
     def _simulate_possession(
         self,
@@ -354,6 +478,13 @@ class SimulationEngine:
             else:
                 player_stats.mid_range_made += 1
 
+        # Sample a concrete court zone within the chosen band from the player's
+        # real shot-chart distribution. Drawn last so the make/miss outcome above
+        # is unaffected, and only on a real FGA (turnovers/fouls return earlier).
+        shot_zone_basic, shot_zone_area = self._choose_shot_zone(
+            rng, tendency.get("shot_zone_weights", {}).get(shot_type, [])
+        )
+
         return PlayByPlay(
             possession=possession,
             offensive_player=offense["name"],
@@ -363,6 +494,8 @@ class SimulationEngine:
             turnover=False,
             score_a=scores["a"],
             score_b=scores["b"],
+            shot_zone_basic=shot_zone_basic,
+            shot_zone_area=shot_zone_area,
         )
 
     @staticmethod
@@ -376,6 +509,27 @@ class SimulationEngine:
             if roll <= cumulative:
                 return shot_type
         return "mid_range"
+
+    @staticmethod
+    def _choose_shot_zone(
+        rng: random.Random, zones: list[dict[str, Any]]
+    ) -> tuple[str | None, str | None]:
+        # Weighted pick of a (SHOT_ZONE_BASIC, SHOT_ZONE_AREA) location within the
+        # already-chosen band. Consumes NO RNG when no zones are available (e.g.
+        # a profile built without shot_zone_weights), so seeded games without
+        # location data stay byte-identical to before.
+        if not zones:
+            return None, None
+        total = sum(max(0.0, zone.get("weight", 0.0)) for zone in zones)
+        if total <= 0:
+            return zones[0].get("basic"), zones[0].get("area")
+        roll = rng.random() * total
+        cumulative = 0.0
+        for zone in zones:
+            cumulative += max(0.0, zone.get("weight", 0.0))
+            if roll <= cumulative:
+                return zone.get("basic"), zone.get("area")
+        return zones[-1].get("basic"), zones[-1].get("area")
 
     def _make_probability(
         self,
